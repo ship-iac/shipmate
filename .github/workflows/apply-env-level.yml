@@ -17,6 +17,9 @@ on:
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }
       deploy: { required: false, type: boolean, default: false }
+      # The per-wave check ids a caller already snapshotted, with wave0 already flipped; supplied,
+      # `snapshot` and `wave0-release` skip and every later job reads these ids.
+      by_wave: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
@@ -28,10 +31,12 @@ on:
 # id-token: write.
 permissions: {}
 jobs:
-  # Pre-flight, before any wave runs: verify that the environments the waves will bind exist and
-  # carry a branch policy, and map the apply-check ids per wave. It binds
-  # shipmate-engine only to check the App key and mint once, so a bad key fails before any apply.
+  # Pre-flight, before any wave runs, unless the caller supplied `by_wave`: verify that the
+  # environments the waves will bind exist and carry a branch policy, and map the apply-check ids
+  # per wave. It binds shipmate-engine only to check the App key and mint once, so a bad key
+  # fails before any apply.
   snapshot:
+    if: ${{ inputs.by_wave == '' }}
     runs-on: ubuntu-slim
     # Permissions cap at each `uses:` boundary, so every calling job must grant checks:read too,
     # or this fails at workflow resolution. actions:read is not decorative: on a private repository,
@@ -56,7 +61,8 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   # Flips one wave's apply checks to in_progress right before it; the wave needs it, so no flip
-  # lands after the completion. Each earlier wave and release must be success or skipped:
+  # lands after the completion. `wave0-release` runs only after `snapshot`: a caller that supplies
+  # `by_wave` has flipped wave0. Each earlier wave and release must be success or skipped:
   # `!cancelled()` alone would run past a failure. A flip reads no check first: one landing
   # seconds after another writer completed the check can reopen it until a later write.
   wave0-release:
@@ -75,98 +81,98 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave1-release:
     needs: [snapshot, wave0, wave0-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave1) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave1) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave2-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave2) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave2) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave3-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release, wave2, wave2-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave3) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave3) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave4-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release, wave2, wave2-release, wave3, wave3-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave4) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave4) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave5-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release, wave2, wave2-release, wave3, wave3-release, wave4, wave4-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave5) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave5) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave6-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release, wave2, wave2-release, wave3, wave3-release, wave4, wave4-release, wave5, wave5-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') && (needs.wave5.result == 'success' || needs.wave5.result == 'skipped') && (needs.wave5-release.result == 'success' || needs.wave5-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') && (needs.wave5.result == 'success' || needs.wave5.result == 'skipped') && (needs.wave5-release.result == 'success' || needs.wave5-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave6) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave6) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave7-release:
     needs: [snapshot, wave0, wave0-release, wave1, wave1-release, wave2, wave2-release, wave3, wave3-release, wave4, wave4-release, wave5, wave5-release, wave6, wave6-release]
-    if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') && (needs.wave5.result == 'success' || needs.wave5.result == 'skipped') && (needs.wave5-release.result == 'success' || needs.wave5-release.result == 'skipped') && (needs.wave6.result == 'success' || needs.wave6.result == 'skipped') && (needs.wave6-release.result == 'success' || needs.wave6-release.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' && (needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && (needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && (needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && (needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && (needs.wave2.result == 'success' || needs.wave2.result == 'skipped') && (needs.wave2-release.result == 'success' || needs.wave2-release.result == 'skipped') && (needs.wave3.result == 'success' || needs.wave3.result == 'skipped') && (needs.wave3-release.result == 'success' || needs.wave3-release.result == 'skipped') && (needs.wave4.result == 'success' || needs.wave4.result == 'skipped') && (needs.wave4-release.result == 'success' || needs.wave4-release.result == 'skipped') && (needs.wave5.result == 'success' || needs.wave5.result == 'skipped') && (needs.wave5-release.result == 'success' || needs.wave5-release.result == 'skipped') && (needs.wave6.result == 'success' || needs.wave6.result == 'skipped') && (needs.wave6-release.result == 'success' || needs.wave6-release.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave7) }}
+          snapshot: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave7) }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -174,7 +180,7 @@ jobs:
 
   wave0:
     needs: [snapshot, wave0-release]
-    if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' && needs.wave0-release.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' && (needs.wave0-release.result == 'success' || inputs.by_wave != '') }}
     # A job that calls a workflow takes no `runs-on`, `environment` or `cache-mode`: `cell.yml`
     # sets each per job. No `concurrency` either: a group repeated here and in `cell.yml` fails
     # the call at once, and `cell.yml` holds it from `apply` through `save`.
@@ -287,14 +293,15 @@ jobs:
     with: *cell-with
     secrets: *cell-secrets
 
-  # Writes one wave's checks when it ends: success completes, any other outcome returns to
-  # queued with a title. `continue-on-error`: a cell missing from the listing fails this job
-  # after ~2 minutes of retries, and `complete` lists the level again.
+  # Writes one wave's checks when it ends, on the ids `snapshot` or the caller mapped: success
+  # completes, any other outcome returns to queued with a title. `continue-on-error`: a cell
+  # missing from the listing fails this job after ~2 minutes of retries, and `complete` lists
+  # the level again.
   wave0-complete:
     needs: [snapshot, wave0]
     # The next-wave clause skips the last populated wave: waves are compacted from wave0, so its
     # successor is empty, and `complete` writes its checks right after it.
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
     runs-on: ubuntu-slim
     # Never fails the level: `complete` writes every snapshot check after all waves, so
     # failing here would skip successor env-levels over a check `complete` then writes.
@@ -307,7 +314,7 @@ jobs:
     steps: &complete-steps
       - uses: $/actions/apply-complete
         with:
-          by-wave: ${{ needs.snapshot.outputs.by_wave }}
+          by-wave: ${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}
           wave-results: ${{ env.WAVE_RESULTS }}
           job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
@@ -316,7 +323,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave1-complete:
     needs: [snapshot, wave1]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave1.result == 'success' || needs.wave1.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave1.result == 'success' || needs.wave1.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -326,7 +333,7 @@ jobs:
     steps: *complete-steps
   wave2-complete:
     needs: [snapshot, wave2]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave2.result == 'success' || needs.wave2.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave2.result == 'success' || needs.wave2.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -336,7 +343,7 @@ jobs:
     steps: *complete-steps
   wave3-complete:
     needs: [snapshot, wave3]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave3.result == 'success' || needs.wave3.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave3.result == 'success' || needs.wave3.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -346,7 +353,7 @@ jobs:
     steps: *complete-steps
   wave4-complete:
     needs: [snapshot, wave4]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave4.result == 'success' || needs.wave4.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave4.result == 'success' || needs.wave4.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -356,7 +363,7 @@ jobs:
     steps: *complete-steps
   wave5-complete:
     needs: [snapshot, wave5]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave5.result == 'success' || needs.wave5.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave5.result == 'success' || needs.wave5.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -366,7 +373,7 @@ jobs:
     steps: *complete-steps
   wave6-complete:
     needs: [snapshot, wave6]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave6.result == 'success' || needs.wave6.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave6.result == 'success' || needs.wave6.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -375,12 +382,13 @@ jobs:
       WAVE_RESULTS: '{"wave6": "${{ needs.wave6.result }}"}'
     steps: *complete-steps
 
-  # Rewrites every check; the only writer on a cancelled run and of the last populated wave.
+  # Rewrites every check; the only writer on a cancelled run and of the last populated wave. It
+  # runs whenever `snapshot` succeeded or the caller supplied `by_wave`.
   # It needs every release, wave and completion, so no flip lands after it and gate-refresh and
   # apply-summary never read a check while a write is in flight.
   complete:
     needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete]
-    if: ${{ always() && needs.snapshot.result == 'success' }}
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') }}
     runs-on: ubuntu-slim
     permissions: *complete-permissions
     environment: *complete-environment

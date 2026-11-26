@@ -113,7 +113,7 @@ def test_every_matrix_job_carries_exactly_this_strategy():
 
 def test_apply_env_level_takes_no_cap():
     """Mutations: declare a `max_parallel` input on `apply-env-level.yml`; make `tools`
-    optional."""
+    optional; `by_wave` default `"x"`."""
     inputs = workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]["inputs"]
     assert inputs == {
         "waves_json": {"required": True, "type": "string"},
@@ -125,13 +125,20 @@ def test_apply_env_level_takes_no_cap():
         "base_sha": {"required": False, "type": "string", "default": ""},
         "deploy": {"required": False, "type": "boolean", "default": False},
         "tools": {"required": True, "type": "string"},
+        "by_wave": {"required": False, "type": "string", "default": ""},
     }
+
+
+def test_apply_env_level_publishes_no_output():
+    """Mutation: declare `on.workflow_call.outputs` with a `by_wave` output."""
+    assert "outputs" not in workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]
 
 
 def test_no_env_level_call_passes_a_cap():
     """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
     or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply-run.yml`'s
-    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call."""
+    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call; pass `by_wave: x` in
+    `deploy.yml`'s `envlevel0` call."""
     found = {
         (workflow, job_id): job["with"]
         for workflow in ("apply-run.yml", "deploy.yml")

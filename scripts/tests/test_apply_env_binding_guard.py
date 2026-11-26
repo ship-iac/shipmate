@@ -120,8 +120,8 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
     )
     wave0_needs = workflow_jobs("apply-env-level.yml")["wave0"]["needs"]
     assert wave0_needs == ["snapshot", "wave0-release"], (
-        "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
-        "wave is already applying"
+        "wave0 must wait for snapshot whenever snapshot runs, or the pre-flight refuses "
+        "a run whose first wave is already applying"
     )
 
 
