@@ -1,8 +1,14 @@
 name: shipmate cell-complete
-description: Complete one cell's apply checks from its own save job, after its apply job succeeded and the job's state step saved its state - completed success, linked to the apply job, the record title restored. A pre-merge re-run, and a run whose pull request has merged, still write it. Refuses a malformed check-id list or apply job id; a failed pull request read or a write that still fails after its retries fails the job, and the level's complete job then writes the check.
+description: Complete one cell's apply checks from its own save job, after its apply job succeeded and the job's state step saved its state - completed success, linked to the apply job, the record title restored. A pre-merge re-run, and a run whose pull request has merged, still write it. Refuses a cell its level's by_wave lists in no wave or in two, or with no check ids, and a malformed apply job id; a failed pull request read or a write that still fails after its retries fails the job, and the level's complete job then writes the check.
 inputs:
-  check-ids:
-    description: JSON list of this cell's apply-check ids, its entry in apply-snapshot's by_wave.
+  by-wave:
+    description: The level's apply-snapshot by_wave, as the level received it, which maps each cell's apply-check name to its ids; about 25 KiB for 256 cells, under the 128 KiB a single environment string or argument may hold.
+    required: true
+  stack:
+    description: The cell's stack path.
+    required: true
+  environment:
+    description: The cell's environment.
     required: true
   apply-job-id:
     description: The cell's apply job's check run id, which the checks link to.
@@ -31,12 +37,14 @@ runs:
     - name: Decide the cell's writes
       shell: bash
       env:
-        CHECK_IDS: ${{ inputs.check-ids }}
+        BY_WAVE: ${{ inputs.by-wave }}
+        STACK: ${{ inputs.stack }}
+        ENV_NAME: ${{ inputs.environment }}
         APPLY_JOB_ID: ${{ inputs.apply-job-id }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" own "$CHECK_IDS" "$APPLY_JOB_ID" \
-          > "$RUNNER_TEMP/cell-writes.jsonl"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" own \
+          "$BY_WAVE" "$STACK" "$ENV_NAME" "$APPLY_JOB_ID" > "$RUNNER_TEMP/cell-writes.jsonl"
 
     - name: Mint App installation token
       id: token

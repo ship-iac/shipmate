@@ -788,7 +788,7 @@ def test_a_wrong_argument_list_refuses(argv):
         apply_complete.main(argv)
     assert str(exc.value) == (
         "::error::usage: apply-complete "
-        "[list | plan <rows> | stranded <reasons> | own <ids> <job id>]"
+        "[list | plan <rows> | stranded <reasons> | own <by_wave> <stack> <env> <job id>]"
     )
 
 

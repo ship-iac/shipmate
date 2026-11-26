@@ -16,9 +16,9 @@ on:
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }
       deploy: { required: false, type: boolean, default: false }
-      # This cell's apply-check ids, a JSON list, which `save` completes; `null` when the cell has
-      # no entry, which `save` refuses.
-      check_ids: { required: true, type: string }
+      # The level's by_wave, unparsed: an expression lookup ignores case, so `save` finds this
+      # cell's check ids by exact name.
+      by_wave: { required: true, type: string }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
@@ -133,7 +133,9 @@ jobs:
         if: ${{ needs.apply.result == 'success' }}
         uses: $/actions/cell-complete
         with:
-          check-ids: ${{ inputs.check_ids }}
+          by-wave: ${{ inputs.by_wave }}
+          stack: ${{ inputs.stack }}
+          environment: ${{ inputs.environment }}
           apply-job-id: ${{ needs.apply.outputs.job_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}

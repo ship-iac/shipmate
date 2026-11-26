@@ -188,7 +188,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
     name: &wave-name ${{ matrix.environment }} / ${{ matrix.stack }}
-    with:
+    with: &cell-with
       cell: ${{ toJSON(matrix) }}
       environment: ${{ matrix.environment }}
       stack: ${{ matrix.stack }}
@@ -200,7 +200,7 @@ jobs:
       provenance_run: ${{ inputs.provenance_run }}
       base_sha: ${{ inputs.base_sha }}
       deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave0[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+      by_wave: ${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}
     # Named, never `inherit`: see the envlevel0 job in apply-run.yml. The App key is the empty
     # literal, so `apply` holds none and `save` reads its environment's.
     secrets: &cell-secrets
@@ -217,19 +217,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave1[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave2:
     needs: [snapshot, wave0, wave1, wave2-release]
@@ -241,19 +229,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave2[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave3:
     needs: [snapshot, wave0, wave1, wave2, wave3-release]
@@ -265,19 +241,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave3[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave4:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4-release]
@@ -289,19 +253,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave4[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave5:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5-release]
@@ -313,19 +265,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave5[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave6:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6-release]
@@ -337,19 +277,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave6[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
   wave7:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7-release]
@@ -361,19 +289,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
     name: *wave-name
-    with:
-      cell: ${{ toJSON(matrix) }}
-      environment: ${{ matrix.environment }}
-      stack: ${{ matrix.stack }}
-      head_sha: ${{ inputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ inputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ inputs.provenance_run }}
-      base_sha: ${{ inputs.base_sha }}
-      deploy: ${{ inputs.deploy }}
-      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave7[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    with: *cell-with
     secrets: *cell-secrets
 
   # Rewrites every check of a level whose release or wave failed or was cancelled, or whose run

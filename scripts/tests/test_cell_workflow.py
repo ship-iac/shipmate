@@ -4,9 +4,10 @@ Threat model: an accidental edit that (a) lets the job that runs pull-request co
 state entry or hold the App key, or the job that writes the state run pull-request code;
 (b) skips `save` after an `apply` that may have changed the state; (c) feeds `save` another
 value than the `apply` job's state output or job id; (d) lets one wave pass the cell another
-row's environment, stack or check ids, which the concurrency group and the steps read; (e) lets
-`save` write the check before its state step succeeded, or after an `apply` that did not
-succeed. Whole parsed values against hand-written constants.
+row's environment or stack, which the concurrency group and the steps read, or another value
+than the level's unparsed `by_wave`; (e) lets `save` write the check before its state step
+succeeded, or after an `apply` that did not succeed. Whole parsed values against hand-written
+constants.
 """
 
 import re
@@ -16,18 +17,6 @@ from _loader import load_script, local_action, workflow_jobs
 ag = load_script("apply-gate")
 
 WAVES = [f"wave{n}" for n in range(8)]
-
-#: The apply check's name as the wave jobs build it, `apply-gate.check_name` with `{0}` the
-#: environment and `{1}` the stack.
-CHECK_NAME_FORMAT = "apply / {0} / {1}"
-
-
-def _check_ids(n):
-    return (
-        f"${{{{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave{n}"
-        f"[format('{CHECK_NAME_FORMAT}', matrix.environment, matrix.stack)]) }}}}"
-    )
-
 
 CELL_WITH = {
     "cell": "${{ toJSON(matrix) }}",
@@ -41,6 +30,8 @@ CELL_WITH = {
     "provenance_run": "${{ inputs.provenance_run }}",
     "base_sha": "${{ inputs.base_sha }}",
     "deploy": "${{ inputs.deploy }}",
+    # Unparsed: an expression lookup ignores case, so `save` matches the check name exactly.
+    "by_wave": "${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}",
 }
 #: The App key is the empty literal, so `apply` holds none and `save` reads its environment's.
 CELL_SECRETS = {
@@ -48,11 +39,6 @@ CELL_SECRETS = {
     "SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}",
     "SHIPMATE_APP_PRIVATE_KEY": "",
 }
-#: `wave3`'s ids lookup, written out: a template-only guard cannot catch a wrong template.
-WAVE3_CHECK_IDS = (
-    "${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave3"
-    "[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}"
-)
 #: The keys of a calling wave job. GitHub refuses `runs-on` and `environment` on a job that calls
 #: a workflow; a repeated `concurrency` group fails the call at once; a `cache-mode: read` there
 #: fails `save` at startup.
@@ -81,7 +67,9 @@ SAVE = {
             "if": "${{ needs.apply.result == 'success' }}",
             "uses": local_action("cell-complete"),
             "with": {
-                "check-ids": "${{ inputs.check_ids }}",
+                "by-wave": "${{ inputs.by_wave }}",
+                "stack": "${{ inputs.stack }}",
+                "environment": "${{ inputs.environment }}",
                 "apply-job-id": "${{ needs.apply.outputs.job_id }}",
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
@@ -120,29 +108,15 @@ APPLY_ORDER = [
 ]
 
 
-def test_every_wave_calls_the_cell_with_its_own_block():
+def test_every_wave_calls_the_cell_with_one_block():
     """Mutations: `stack: ${{ matrix.environment }}` on `wave3`; add `cache-mode: read` to
-    `wave0`; `.wave2` in `wave3`'s `check_ids`; `${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}` for the
-    empty literal in the shared secrets block."""
+    `wave0`; `by_wave: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave)) }}`
+    on `wave2` (re-serializing merges names differing only in case);
+    `${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}` for the empty literal in the shared secrets block."""
     jobs = workflow_jobs("apply-env-level.yml")
     found = {w: (set(jobs[w]), jobs[w]["uses"], jobs[w]["with"], jobs[w]["secrets"]) for w in WAVES}
-    expected = {
-        f"wave{n}": (
-            WAVE_KEYS,
-            "./.github/workflows/cell.yml",
-            {**CELL_WITH, "check_ids": _check_ids(n)},
-            CELL_SECRETS,
-        )
-        for n in range(8)
-    }
-    assert found == expected
-    assert jobs["wave3"]["with"]["check_ids"] == WAVE3_CHECK_IDS
-
-
-def test_the_wave_jobs_build_the_check_name_as_apply_gate_does():
-    """A name the lookup misses passes `null`, which `save` refuses, so every cell would fail.
-    Mutation: `apply-gate.check_name` builds `apply / <stack> / <env>`."""
-    assert CHECK_NAME_FORMAT.format("dev eu", "stacks/a b") == ag.check_name("stacks/a b", "dev eu")
+    expected = (WAVE_KEYS, "./.github/workflows/cell.yml", CELL_WITH, CELL_SECRETS)
+    assert found == dict.fromkeys(WAVES, expected)
 
 
 def test_the_save_job_is_whole():

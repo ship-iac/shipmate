@@ -223,7 +223,7 @@ def test_complete_runs_only_when_the_level_did_not_succeed():
 
 
 def test_each_wave_needs_snapshot_its_release_and_every_earlier_wave():
-    """Mutations: drop `snapshot` from `wave2.needs`, whose `check_ids` lookup then reads an empty
+    """Mutations: drop `snapshot` from `wave2.needs`, whose `by_wave` then reads an empty
     `needs.snapshot`; drop `wave3-release` from `wave3.needs`."""
     jobs = workflow_jobs("apply-env-level.yml")
     assert {w: jobs[w]["needs"] for w in WAVES} == WAVE_NEEDS

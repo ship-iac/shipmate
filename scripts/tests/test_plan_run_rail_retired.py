@@ -36,8 +36,8 @@ EXPECTED_INPUTS = {
         "workflow_call": [
             "auto",
             "base_sha",
+            "by_wave",
             "cell",
-            "check_ids",
             "deploy",
             "environment",
             "head_sha",
