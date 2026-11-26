@@ -698,7 +698,7 @@ def test_a_marker_for_a_longer_run_id_does_not_answer_its_prefix(gh):
     assert gh.posts == [_told(12)]
 
 
-def test_review_then_summary_tell_a_waiting_run_once(gh):
+def test_two_waiters_invocations_tell_a_waiting_run_once(gh):
     """Two invocations against comments that keep what was posted. Mutation: skip the marker
     read -- red (posted twice)."""
     gh.runs, gh.jobs = _waiting(40)
@@ -707,7 +707,7 @@ def test_review_then_summary_tell_a_waiting_run_once(gh):
     assert gh.posts == [_told(40)]
 
 
-def test_a_waiting_run_first_listed_by_summary_is_told_then(gh):
+def test_a_waiting_run_first_listed_by_a_later_invocation_is_told_then(gh):
     """Mutation: answer only on the first invocation (a module-level flag) -- red."""
     gh.waiters()
     gh.runs, gh.jobs = _waiting(60)
