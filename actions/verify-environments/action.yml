@@ -6,7 +6,7 @@ inputs:
     required: true
 outputs:
   refusal:
-    description: The first error of the `::error::` message that failed the step, without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails.
+    description: The first error of the `::error::` message that failed the step, without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name an environment), so a reader passes it through `env:`.
     value: ${{ steps.verify.outputs.refusal }}
 runs:
   using: composite

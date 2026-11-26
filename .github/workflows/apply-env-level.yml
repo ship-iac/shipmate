@@ -17,8 +17,8 @@ on:
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }
       deploy: { required: false, type: boolean, default: false }
-      # The per-wave check ids a caller already snapshotted, with wave0 already flipped; supplied,
-      # `snapshot` and `wave0-release` skip and every later job reads these ids.
+      # The per-wave check ids a caller already snapshotted, with wave0 already flipped. When it
+      # is set, `snapshot` and `wave0-release` skip and every later job reads these ids.
       by_wave: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
@@ -31,10 +31,9 @@ on:
 # id-token: write.
 permissions: {}
 jobs:
-  # Pre-flight, before any wave runs, unless the caller supplied `by_wave`: verify that the
-  # environments the waves will bind exist and carry a branch policy, and map the apply-check ids
-  # per wave. It binds shipmate-engine only to check the App key and mint once, so a bad key
-  # fails before any apply.
+  # Pre-flight unless the caller supplied `by_wave`: verify the environments the waves bind and
+  # map the apply-check ids per wave. It binds shipmate-engine only to check the App key and mint
+  # once, so a bad key fails before any apply.
   snapshot:
     if: ${{ inputs.by_wave == '' }}
     runs-on: ubuntu-slim
@@ -61,10 +60,8 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   # Flips one wave's apply checks to in_progress right before it; the wave needs it, so no flip
-  # lands after the completion. `wave0-release` runs only after `snapshot`: a caller that supplies
-  # `by_wave` has flipped wave0. Each earlier wave and release must be success or skipped:
-  # `!cancelled()` alone would run past a failure. A flip reads no check first: one landing
-  # seconds after another writer completed the check can reopen it until a later write.
+  # lands after the completion. Earlier waves and releases must be success or skipped, not merely
+  # uncancelled. A flip reads no check first, so it can reopen one another writer just completed.
   wave0-release:
     needs: [snapshot]
     if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}
@@ -293,10 +290,9 @@ jobs:
     with: *cell-with
     secrets: *cell-secrets
 
-  # Writes one wave's checks when it ends, on the ids `snapshot` or the caller mapped: success
-  # completes, any other outcome returns to queued with a title. `continue-on-error`: a cell
-  # missing from the listing fails this job after ~2 minutes of retries, and `complete` lists
-  # the level again.
+  # Writes one wave's checks when it ends: success completes, any other outcome returns to queued
+  # with a title. `continue-on-error`: a cell missing from the listing fails this job after ~2
+  # minutes of retries, and `complete` lists the level again.
   wave0-complete:
     needs: [snapshot, wave0]
     # The next-wave clause skips the last populated wave: waves are compacted from wave0, so its
@@ -383,8 +379,7 @@ jobs:
     steps: *complete-steps
 
   # Rewrites every check; the only writer on a cancelled run and of the last populated wave. It
-  # runs whenever `snapshot` succeeded or the caller supplied `by_wave`.
-  # It needs every release, wave and completion, so no flip lands after it and gate-refresh and
+  # needs every release, wave and completion, so no flip lands after it and gate-refresh and
   # apply-summary never read a check while a write is in flight.
   complete:
     needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete]

@@ -3015,8 +3015,8 @@ one per changed `auto` environment no other pull request locks
 
 **What an `auto` run applies.** It passes `apply.yml`'s `admit`, waits in its
 pull request's apply queue and passes `apply-run.yml`'s `review` as any apply
-dispatch does (§Comment-ops), then `detect` runs the bare form
-over the pending cells of the `auto` environments. Every other pending
+dispatch does (§Comment-ops). `detect`, which runs beside `review`, runs the
+bare form over the pending cells of the `auto` environments. Every other pending
 environment counts as not fully applying, so its `needs` successors are
 skipped. A pending environment that is neither `auto`, `targeted` nor held is
 left for a bare apply (`bare_envs`) and named in the result comment. Review

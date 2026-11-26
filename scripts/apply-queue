@@ -71,7 +71,7 @@ def _segments(job):
 
 
 def _is_review(job):
-    """Whether `job` is the call's first job, `<caller> / run / review`, matched whole: a cell
+    """Whether `job` is the call's `review` job, `<caller> / run / review`, matched whole: a cell
     of env `run` and root stack `review` also ends in ` / run / review`."""
     segments = _segments(job)
     return len(segments) == 3 and segments[1:] == ["run", "review"]
