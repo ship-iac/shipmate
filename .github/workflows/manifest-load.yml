@@ -51,6 +51,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/build-matrix@main
       - if: false
+        uses: ship-iac/shipmate/actions/cell-complete@main
+      - if: false
         uses: ship-iac/shipmate/actions/cell-init@main
       - if: false
         uses: ship-iac/shipmate/actions/claim@main

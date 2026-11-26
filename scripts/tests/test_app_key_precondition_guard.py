@@ -96,6 +96,7 @@ _SITES = {
     ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-complete" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-release" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "cell-complete" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-snapshot" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_WITH),

@@ -4,7 +4,10 @@
 `apply-complete list` prints this run's jobs listing, every attempt, one job per line;
 `apply-complete` reads that listing on stdin and prints one row per decided cell;
 `apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan;
-`apply-complete stranded <reasons>` refuses with the reasons no attempt resolved.
+`apply-complete stranded <reasons>` refuses with the reasons no attempt resolved;
+`apply-complete own <by_wave> <stack> <env> <job id>` prints the `success` writes of one cell
+whose `apply` job `<job id>` succeeded and whose state is saved, for that cell's own `save` job
+(`own`).
 
 Evidence is `GET /actions/runs/{id}/jobs?filter=all`, not the cells' own artifacts: a job
 conclusion is written by GitHub, so one cell cannot claim another applied. A cell lying about
@@ -26,13 +29,13 @@ Per cell, in this order:
    parse. This covers a re-run whose own rows read refused after an unsaved attempt.
 3. Otherwise:
 
-| `apply` row | `save` row | Write (`plan`) |
+| `apply` row | `save` row's state (`apply-gate.state_safe`) | Write (`plan`) |
 | --- | --- | --- |
-| `success` | `success` | `completed`/`success`, the `apply` job's URL, the record title |
-| `failure` | `success` | `queued`, `Failed: <first error line>` of the `apply` job |
-| `cancelled` | `success` | `queued`, `Cancelled` |
-| other conclusion | `success` | `queued`, `Not applied (<conclusion>)`: never `success` |
-| any, never applied | not `success` | `queued`, `Failed: <first error line>` of the `save` job |
+| `success` | safe | `completed`/`success`, the `apply` job's URL, the record title |
+| `failure` | safe | `queued`, `Failed: <first error line>` of the `apply` job |
+| `cancelled` | safe | `queued`, `Cancelled` |
+| other conclusion | safe | `queued`, `Not applied (<conclusion>)`: never `success` |
+| any, never applied | not safe | `queued`, `Failed: <first error line>` of the `save` job |
 | `cancelled`, no steps | none | `queued`, `Cancelled` (cancelled while pending) |
 | none | none | `queued`, `Not run` when the wave did not run, else unresolved |
 
@@ -61,6 +64,7 @@ from _shipmate import (
     command_data,
     current_run_url,
     gh_json,
+    is_run_id,
     is_transient,
     one_line,
     print_annotated,
@@ -119,7 +123,7 @@ def _decide(check, ids, own, jobs, not_run):
         return {**_row(check, ids), "held": True}
     if not applies:
         return _row(check, ids) if not_run else None
-    if pending_cancel or saves[-1].get("conclusion") == "success":
+    if pending_cancel or ag.state_safe(saves[-1]):
         return _row(check, ids, applies[-1])
     # Not held, so this attempt did not apply: the save itself failed.
     return _row(check, ids, {**saves[-1], "conclusion": "failure"})
@@ -225,6 +229,43 @@ def plan(every_path):
             print(json.dumps(entry))
 
 
+def _cell_ids(by_wave_json, name):
+    """The check ids of the cell `name` in `by_wave_json`, `apply-snapshot`'s `by_wave`, matched
+    exactly, so names differing only in case stay apart. Refuses when the name is in no wave or
+    in two, or its ids are not a non-empty list of positive integers."""
+    try:
+        by_wave = json.loads(by_wave_json)
+    except ValueError:
+        by_wave = None
+    if not isinstance(by_wave, dict):
+        raise SystemExit("::error::by_wave is not a JSON object of waves")
+    found = [cells[name] for cells in by_wave.values() if isinstance(cells, dict) and name in cells]
+    if len(found) != 1:
+        raise SystemExit(f"::error::{name} is listed in {len(found)} waves of by_wave, not one")
+    ids = found[0]
+    if not (
+        isinstance(ids, list)
+        and ids
+        and all(isinstance(i, int) and not isinstance(i, bool) and i > 0 for i in ids)
+    ):
+        raise SystemExit(f"::error::the apply-check ids of {name} are not a non-empty list of ids")
+    return ids
+
+
+def own(by_wave_json, stack, env, job_id):
+    """Print the `patch-checks` entries completing the checks of the cell `stack` in `env`
+    (`_cell_ids`), `success` and linked to the `apply` job `job_id` of this run, through
+    `writes`, which restores the record title. Refuses a `job_id` that is not 1 to 20 digits:
+    `apply` runs pull-request code, and the id is bound into a link."""
+    ids = _cell_ids(by_wave_json, ag.check_name(stack, env))
+    if not is_run_id(job_id):
+        raise SystemExit("::error::the apply job id is not 1 to 20 digits")
+    url = f"{current_run_url()}/job/{job_id}"
+    row = {"check": "", "ids": ids, "conclusion": "success", "job_id": int(job_id), "url": url}
+    for entry in writes(row, os.environ["GITHUB_REPOSITORY"]):
+        print(json.dumps(entry))
+
+
 def list_jobs():
     """Print every job of every attempt of this run, one JSON object per line, from one paginated
     `gh api` call, unvalidated. A failure `_shipmate.is_transient` reads as permanent (a 403, a
@@ -264,15 +305,19 @@ def stranded(reasons_path):
     )
 
 
+MODES = {"list": (0, list_jobs), "plan": (1, plan), "stranded": (1, stranded), "own": (4, own)}
+
+
 def main(argv=()):
-    if argv == ["list"]:
-        list_jobs()
-        return
-    if len(argv) == 2 and argv[0] in ("plan", "stranded"):
-        (plan if argv[0] == "plan" else stranded)(argv[1])
-        return
     if argv:
-        raise SystemExit("::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]")
+        count, mode = MODES.get(argv[0], (None, None))
+        if len(argv) - 1 != count:
+            raise SystemExit(
+                "::error::usage: apply-complete "
+                "[list | plan <rows> | stranded <reasons> | own <by_wave> <stack> <env> <job id>]"
+            )
+        mode(*argv[1:])
+        return
     try:
         results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
     except ValueError:

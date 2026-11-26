@@ -1397,13 +1397,32 @@ to a GitHub-hosted label, or move the stack to a remote backend
 (`CONTRACT.md` §State backend). When a cell's `save` job prints the same text,
 its apply may have run: follow §`The apply step ran and its state was not saved`.
 
+### `reaches pull-request code in this apply job`
+
+A cell's `apply` job refused at its first step,
+`Refuse an apply job that holds the App key`, because a secret named
+`SHIPMATE_APP_PRIVATE_KEY` reached it: from the environment it binds
+(`<env>-apply`, or the bare `<env>` under `split: false`), or from a
+repository or organization secret, which every wave passes to the cell. A
+repository- or organization-scoped key makes every `apply` refuse. The step
+ran before any pull-request code, printed no value, and applied nothing.
+Delete the secret where it is:
+`gh secret delete SHIPMATE_APP_PRIVATE_KEY --env <binding> --repo <owner>/<repo>`,
+or without `--env` for a repository secret, or with `--org <org>` for an
+organization secret. Keep the key only on `shipmate-engine`
+(`docs/github-app.md` §5–6), then apply again: comment `shipmate apply`, or
+re-run the merge deploy.
+
 ### `The apply step ran and its state was not saved`
 
 An apply cell on a local backend may have run its `Apply the stored plan` step
 (status `success`, `failure` or `cancelled`, or a job that ended before the
-step reported), and its state is not known saved. The cell's `save` job failed
-or was cancelled. A failed `save` job's `::error::` ends with this section's
-name, in one of these forms:
+step reported), and its state is not known saved: the cell's `save` job did not
+report its `Save the cell's state` step `success`. The step failed, or the job
+was cancelled or lost its runner before it, or GitHub rejected the job before
+its first step under `shipmate-engine`'s deployment branch policy or protection
+rules. A failed `Save the cell's state` step's `::error::` ends with this
+section's name, in one of these forms:
 
 - ``the state of <env> / <stack> was not found under <key> or <key>-r1. ...``:
   the save under the cell's key, and the save under the same key with `-r1`,
@@ -1431,6 +1450,14 @@ cannot tell the backend without that output. Its state is in the backend, which
 shipmate never saves, so the steps below do not apply. Return or complete its
 check as in
 [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand).
+
+A cell on any backend is held too when its `save` job ends, or is rejected,
+before `Save the cell's state` reports `success`.
+
+A `save` job that fails after `Save the cell's state` succeeded, at
+`Complete this cell's apply check`, saved the state; this section does not
+apply. Its check write failed, so the wave fails, later waves and environment
+levels do not start, and the level's `complete` job writes the check `success`.
 
 A `save` job whose apply never ran saves nothing and succeeds. When an earlier
 attempt may have applied the cell without saving, a re-run's `save` job looks
@@ -3321,10 +3348,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-five jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+All twenty-nine jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
 `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
-`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
-`wave0-complete` … `wave6-complete` and `complete`, `deploy.yml` `summary` and `replan`,
+`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`
+and `complete`, `cell.yml` `save`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
@@ -3383,7 +3410,8 @@ another run holds in progress; follow the remedy that sentence names.
 ### An apply check never completes after a successful apply
 
 The apply itself succeeded, but the `apply / <env> / <stack>` check stays
-pending and the trailing completion job failed.
+pending and the job that completes it, the cell's `save` job or the level's
+`complete` job, failed.
 
 The `shipmate-engine` environment's deployment branch policy names a branch that
 does not exist — a typo, or a repository whose default branch is not `main`. A
@@ -3392,6 +3420,8 @@ policy naming a nonexistent branch fails closed: the completion job is denied
 check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
+Then, for a cell whose `save` job the policy rejected, which saved no state,
+follow §`The apply step ran and its state was not saved`.
 
 ### `waiting 60 s for GitHub's secondary rate limit, then retrying: command failed (1): gh api ...`
 

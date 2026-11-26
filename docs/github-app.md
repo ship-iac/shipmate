@@ -280,10 +280,10 @@ as above, and step 5 runs in every consumer repository.
   `.github/workflows` (the contents API and a git-data tree both answer 403) and
   cannot move the default branch under its ruleset (422); probed 2026-10-24.
 - The App mints a fresh installation token per job and authors every
-  `apply / <env> / <stack>` check (create pending, completed after the wave
-  that applied its cell, or in the final `complete` job when that wave was
-  cancelled, or in `apply-run.yml`'s `unflip` job when the first level never
-  started), the
+  `apply / <env> / <stack>` check (create pending, completed by the `save` job
+  of the cell that applied it, or by the level's `complete` job when a release
+  or wave of the level failed or was cancelled, or in `apply-run.yml`'s
+  `unflip` job when the first level never started), the
   `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
@@ -358,7 +358,7 @@ actual work here:
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request picks the environment its plan cells bind (`<env>-plan`, or the
   bare `<env>` for a `split: false` entry). Detect refuses the name
-  `shipmate-engine`, so no cell binds the engine's own environment. What makes
+  `shipmate-engine`, so no plan cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
   is named only in the `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
   none of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`

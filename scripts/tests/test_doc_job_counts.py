@@ -9,9 +9,10 @@ Each count is derived from the reusable engine workflows in `.github/workflows/`
 ids as a multiset; which workflow a job sits under is not checked. Threat model: a job added,
 moved or relabelled without the prose following it.
 
-Mutations, each red: `thirty-three` to `thirty-two` at each of `CONTRACT.md`'s two sites,
-`docs/aws.md`'s two sites and `docs/getting-started.md`'s; `thirty-five` to `thirty-four` in
-`docs/troubleshooting.md`; `wave6-complete` to `wave7-complete` in each list; expand only
+Mutations, each red: `twenty-six` to `twenty-five` at each of `CONTRACT.md`'s two sites,
+`docs/aws.md`'s two sites and `docs/getting-started.md`'s; `twenty-nine` to `twenty-eight` in
+`docs/troubleshooting.md`; `wave7-release` to `wave6-release` in each list; drop `save` from
+`docs/troubleshooting.md`'s list; expand only
 `wave0-<x>` … `wave7-<x>` in `_listed`; drop `and `result`` from the `unlock.yml` entry of the
 `CONTRACT.md` and `docs/aws.md` lists; drop `and `replan`` from `docs/troubleshooting.md`'s list;
 drop `unflip` from the `apply-run.yml` entry of each list; with `ci.yml`'s job moved to
@@ -55,8 +56,8 @@ ENGINE_BOUND = _jobs(_binds_engine)
 
 def test_the_derived_counts_are_the_documented_ones():
     """The counts the prose states, hand-written. Mutation: count every workflow with
-    `ci.yml`'s job on `ubuntu-slim` -- 34, red."""
-    assert (len(SLIM), len(ENGINE_BOUND)) == (33, 35)
+    `ci.yml`'s job on `ubuntu-slim` -- 27, red."""
+    assert (len(SLIM), len(ENGINE_BOUND)) == (26, 29)
 
 
 def _doc(name):
