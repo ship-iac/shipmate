@@ -348,6 +348,30 @@ def test_check_runs_narrows_to_one_name_url_encoded():
     ]
 
 
+def test_a_counted_listing_narrows_to_one_name_url_encoded():
+    """Mutation: drop `query` from the counted `_pages` path -> the page names no check."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return json.dumps({"total_count": 1, "check_runs": [{"id": 1}]})
+
+    out = check_runs("o/r", _SHA, run=run, name="apply / dev / stacks/a", counted=True)
+    assert (out, calls) == (
+        '{"id": 1}\n',
+        [
+            [
+                "gh",
+                "api",
+                (
+                    f"repos/o/r/commits/{_SHA}/check-runs?filter=all"
+                    "&check_name=apply%20%2F%20dev%20%2F%20stacks%2Fa&per_page=100&page=1"
+                ),
+            ]
+        ],
+    )
+
+
 def _check_pages(*pages):
     """A `run` double answering page N of the counted listing with `pages[N - 1]`, a
     `(rows, total_count)` pair, and the calls it got."""

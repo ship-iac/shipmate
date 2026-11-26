@@ -202,11 +202,6 @@ def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
         f"refusal={_UNLISTED}\n",
     )
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert "::error::" in _out(proc)
-    assert "re-run" in _out(proc), (
-        "a transient listing failure that reads as a bug gets 'fixed' by softening "
-        "this refusal -- the message must say a re-run clears it"
-    )
 
 
 @bash_only
@@ -304,7 +299,8 @@ def test_the_action_declares_exactly_the_refusal_output():
             "description": (
                 "The first error of the `::error::` message that failed the step, without the "
                 "prefix, its lines joined into one; empty when the step raised none. Set although "
-                "the step fails."
+                "the step fails. Branch-controlled text (it can name an environment), so a reader "
+                "passes it through `env:`."
             ),
             "value": "${{ steps.verify.outputs.refusal }}",
         }

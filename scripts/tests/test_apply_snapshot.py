@@ -260,9 +260,8 @@ def test_counted_true_lists_through_the_counted_pages(tmp_path):
         checks_jq=".check_runs[]",
     )
     assert (proc.returncode, proc.stdout) == (1, _LISTING_FAILED), proc.stderr
-    assert calls[0] == [
-        "api",
-        f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100&page=1",
+    assert calls == [
+        ["api", f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100&page=1"]
     ]
 
 

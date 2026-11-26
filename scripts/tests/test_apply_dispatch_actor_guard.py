@@ -312,10 +312,10 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
         assert job.get("environment") is None, f"{name}: {GUARD_JOB} must name no environment"
         assert job.get("secrets") is None, f"{name}: {GUARD_JOB} must be passed no secrets"
     admit_checks = workflow_jobs("apply.yml")["admit"]["steps"][:CHECK_STEP_COUNT]
-    for name in DISPATCH_PATHS:
-        for step in [*workflow_jobs(name)[GUARD_JOB]["steps"], *admit_checks]:
-            assert "checkout" not in str(step.get("uses", "")).lower()
-            assert "secrets." not in str(step.get("run", ""))
+    steps = [s for name in DISPATCH_PATHS for s in workflow_jobs(name)[GUARD_JOB]["steps"]]
+    for step in [*steps, *admit_checks]:
+        assert "checkout" not in str(step.get("uses", "")).lower()
+        assert "secrets." not in str(step.get("run", ""))
 
 
 def test_every_fan_out_job_carries_the_guard_in_its_needs():
