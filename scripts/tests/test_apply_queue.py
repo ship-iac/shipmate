@@ -682,7 +682,7 @@ def test_a_run_whose_own_call_ended_names_no_newer_holder(gh):
 
 
 def test_a_review_listed_on_the_second_own_listing_names_the_holder(gh):
-    """Mutation: list the own jobs once (`range(1)`) -- red (no holder named)."""
+    """Mutation: list the own jobs once (`range(1)`) -- red (no own re-list)."""
     gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE], True), ([_QUEUE, _rv("pending")], True)])
     gh.go()
     assert gh.cancels == [_cancel(40)]
@@ -690,24 +690,75 @@ def test_a_review_listed_on_the_second_own_listing_names_the_holder(gh):
     assert (gh.job_reads, gh.sleeps) == ([40, 45, 50, 50], [3])
 
 
-def test_a_review_never_listed_names_no_run(gh):
-    """One listing and three re-lists, 3 s apart. Mutations: `_OWN_RELISTS = 4` -- red;
-    `_OWN_PAUSE = 2` -- red."""
-    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE], True)])
+def test_an_incomplete_then_complete_own_listing_names_the_holder(gh, capsys):
+    """Mutation: read an incomplete listing that lists `review` (drop `complete and`) -- red
+    (no re-list)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind(
+        [([_QUEUE, _rv("in_progress")], False), ([_QUEUE, _rv("pending")], True)]
+    )
+    gh.go()
+    assert gh.posts == _held(_WAITS.format(45), _CANCELLED.format(40))
+    assert (gh.job_reads, gh.sleeps) == ([40, 45, 50, 50], [3])
+    assert _warnings(capsys) == []
+
+
+_UNDECIDED = (
+    "::warning::could not tell whether run 50 waits for the group: its jobs listing was "
+    "incomplete or listed no review; the reply names the run it may wait behind"
+)
+
+
+@pytest.mark.parametrize(
+    "own_jobs",
+    [[([_QUEUE, _rv("pending")], False)], [([_QUEUE], True)]],
+    ids=["incomplete-throughout", "review-never-listed"],
+)
+def test_an_undecided_own_listing_names_the_holder_and_warns(gh, capsys, own_jobs):
+    """One listing and three re-lists, 3 s apart, then the holder is named as when this run
+    waits. Mutations: undecided reads as no wait (final `return False`) -- red; drop the warning
+    -- red; `_OWN_RELISTS = 4` -- red; `_OWN_PAUSE = 2` -- red."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind(own_jobs)
     gh.go()
     assert gh.cancels == [_cancel(40)]
-    assert gh.posts == _reply(_CANCELLED.format(40))
+    assert gh.posts == _held(_WAITS.format(45), _CANCELLED.format(40))
     assert (gh.job_reads, gh.sleeps) == ([40, 45, 50, 50, 50, 50], [3, 3, 3])
+    assert _warnings(capsys) == [_UNDECIDED]
 
 
-def test_an_incomplete_own_listing_names_no_run(gh):
-    """Its `review` is listed `pending`, but a hidden job may show the call past it. Mutation:
-    drop the `not complete` return of `own_waits` -- red (45 named)."""
-    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("pending")], False)])
+def test_a_run_whose_own_review_runs_names_no_run(gh):
+    """Mutation: `_in_group_wait` reads `in_progress` as waiting -- red (45 named)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("in_progress")], True)])
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
-    assert gh.job_reads == [40, 45, 50]
+    assert gh.sleeps == []
+
+
+def test_a_run_the_holder_already_told_posts_only_the_rest(gh):
+    """The App's comment starts with this run's waits marker: the reply drops the marker and the
+    waits sentence. Mutation: skip the `told` check -- red."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("pending")], True)])
+    gh.comments = [("shipmate-iac[bot]", "<!-- shipmate:waits-50 -->\n### shipmate apply")]
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+    assert gh.marker_reads == [("o/r", "7", "<!-- shipmate:waits-50 -->")]
+
+
+def test_a_run_told_with_nothing_else_to_say_posts_nothing(gh):
+    """Mutation: post when only the waits sentence was dropped (drop `if not said`) -- red."""
+    gh.runs, gh.jobs = [_r(45, ref=_HEAD)], {45: ([_rv("in_progress")], True)}
+    gh.comments = [("shipmate-iac[bot]", "<!-- shipmate:waits-50 -->\n### shipmate apply")]
+    gh.go()
+    assert gh.posts == []
+
+
+def test_a_waits_marker_by_another_author_does_not_tell_this_run(gh):
+    """Mutation: drop the login filter in `told` -- red (not posted with the marker)."""
+    gh.runs, gh.jobs = [_r(45, ref=_HEAD)], {45: ([_rv("in_progress")], True)}
+    gh.comments = [("other[bot]", "<!-- shipmate:waits-50 -->")]
+    gh.go()
+    assert gh.posts == _held(_WAITS.format(45))
 
 
 _PULL = "https://github.com/o/r/pull/7#issuecomment-"

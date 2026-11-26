@@ -134,19 +134,21 @@ _OWN_RELISTS, _OWN_PAUSE = 3, 3
 
 
 def own_waits(repo, own):
-    """Whether this run's own call waits for `shipmate-apply-<pr_number>` (`_in_group_wait`) over
-    a complete jobs listing of run `own`. While the call's `review` is not listed, re-lists up to
-    `_OWN_RELISTS` times, `_OWN_PAUSE` seconds apart; an incomplete listing, or a `review` never
-    listed, is no wait."""
+    """Whether this run's own call waits for `shipmate-apply-<pr_number>` (`_in_group_wait`): a
+    complete jobs listing of run `own` whose call's `review` is listed and not `pending` is no
+    wait. While the listing is incomplete or lists no `review`, re-lists up to `_OWN_RELISTS`
+    times, `_OWN_PAUSE` seconds apart; still undecided, it warns and counts as a wait."""
     for relist in range(_OWN_RELISTS + 1):
         if relist:
             time.sleep(_OWN_PAUSE)
         jobs, complete = run_jobs(repo, own)
-        if not complete:
-            return False
-        if any(_is_review(j) for j in jobs):
+        if complete and any(_is_review(j) for j in jobs):
             return _in_group_wait(jobs)
-    return False
+    print(
+        f"::warning::could not tell whether run {own} waits for the group: its jobs listing was "
+        "incomplete or listed no review; the reply names the run it may wait behind"
+    )
+    return True
 
 
 def _link(run_id):
@@ -333,13 +335,32 @@ def main():
         reply(repo, pr, own, slug, self_by_app)
 
 
+def told(repo, pr, own, slug):
+    """Whether a comment of `<slug>[bot]` on pull request `pr` starts with run `own`'s
+    `waits_marker`: the holder's `waiters` told this run first. A failed listing warns and reads
+    as not told."""
+    marker = waits_marker(own)
+    try:
+        listed = uc.marker_comments(repo, pr, marker)
+    except SystemExit as exc:
+        print(f"::warning::could not list the comments of #{pr}: {one_line(exc.code)}")
+        return False
+    return any(c["login"] == f"{slug}[bot]" and c["head"].startswith(marker) for c in listed)
+
+
 def reply(repo, pr, own, slug, self_by_app):
     """`queue`, then its reply on pull request `pr`, under this run's `waits_marker` when it
-    names the run this one waits for."""
+    names the run this one waits for. When the App already told this run (`told`), the reply
+    drops the marker and the waits sentence, and posts only the rest, if any."""
     said, named = queue(repo, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
     if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
+        return
+    # `sentences` puts the waits sentence first.
+    if named and told(repo, pr, own, slug):
+        said, named = said[1:], False
+    if not said:
         return
     marker = f"{waits_marker(own)}\n" if named else ""
     body = marker + rc.body(
