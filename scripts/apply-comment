@@ -391,10 +391,10 @@ def apply_check_state(rows, present, done, held):
 
     The pending apply checks ARE the work queue, so they -- not the per-cell
     artifact -- are the authority on whether a unit is done. `Compose cell
-    summary` runs `if: always()`, and the trailing `complete` job completes the
-    check only for a cell whose `apply` and `save` jobs succeeded, so an `applied`
-    artifact can coexist with a pending check (the `complete` job failed, or a
-    newer plan re-created the check); and the continue-on-error upload can drop,
+    summary` runs `if: always()`, and a check is completed (by the cell's `save` job,
+    else the level's `complete` job) only for a cell whose `apply` job and `save` state
+    step succeeded, so an `applied` artifact can coexist with a pending check (both
+    writes failed, or a newer plan re-created the check); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
     Two directions, therefore:
 

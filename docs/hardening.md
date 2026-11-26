@@ -1263,7 +1263,17 @@ cells, and each cell binds one GitHub Environment, the bound environment:
 bare `<env>` on both paths when the environment's entry holds `split: false`.
 The bound environment's required reviewers, secrets, variables and OIDC subject
 apply to the cell. None of the three binds `shipmate-engine`, so none holds the
-App key (§16).
+App key (§16). An apply cell's `apply` job refuses at its first step, before
+any pull-request code runs, when its bound environment holds a
+`SHIPMATE_APP_PRIVATE_KEY` secret.
+
+The cell's `save` job, in the same `cell.yml` call, binds `shipmate-engine`
+and holds the App key to complete the cell's apply check. It checks out nothing
+and runs no pull-request code. It runs on the cell's `runs_on` runner class
+right after the cell's `apply` job ran providers and provisioners from the pull
+request on that class. On a GitHub-hosted runner each job gets a fresh machine.
+On a reused self-hosted runner, whatever the `apply` job left on the machine
+runs beside the key.
 
 | Job | Runs without anyone's approval when | Holds |
 |---|---|---|

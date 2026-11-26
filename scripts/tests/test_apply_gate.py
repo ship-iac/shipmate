@@ -95,7 +95,7 @@ def test_cell_part_reads_these_literal_names(job_name, stack, env, expected):
 _LEVELED = [
     {"id": 1, "name": "apply / run / L0 / dev-eu / stacks/app / apply"},
     {"id": 2, "name": "apply / run / L0 / dev-eu / stacks/app / save"},
-    {"id": 3, "name": "apply / run / L1 / wave0-complete"},
+    {"id": 3, "name": "apply / run / L1 / complete"},
     {"id": 4, "name": "apply / run / L1 / dev-eu / stacks/app / apply"},
     {"id": 5, "name": "apply / run / L0 / dev-us / stacks/app / save"},
 ]

@@ -158,7 +158,11 @@ refuses the run before any cell applies.
    populated env-level's `wave0` (First level, below).
 3. Written once the cell's outcome is read. The summary is never rewritten; the
    error goes in the title. A check returned to `queued` keeps its last start
-   time.
+   time. A cell's `save` job writes its `success`, at its step
+   `Complete this cell's apply check`, once the cell's `apply` job and the
+   `save` job's `Save the cell's state` step succeeded. The level's `complete`
+   job runs only when a release or wave of the level failed or was cancelled,
+   or the run was cancelled, and then writes every check of the level.
 
 | Cell outcome | Write |
 | --- | --- |
@@ -168,13 +172,22 @@ refuses the run before any cell applies.
 | not run: its wave did not run | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
-| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Last wave** describe |
+| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Failed completion** describe |
 
 A write other than `success` leaves alone a check another writer, such as a
 merge deploy, has completed. The first error line is the message of the failed
 job's first `failure` annotation: its first line, control characters stripped,
 cut at 120 characters, or `Failed` alone when there is none or it cannot be
 read.
+
+A cell's state counts as saved when its `save` job's `Save the cell's state`
+step succeeded, whatever the job's conclusion. A `save` job that fails after
+that step, at the check write, saved the state: its wave fails, so later waves
+and environment levels do not start, and the level's `complete` writes the
+cell's check `success`. A `save` job that ends before that step reports
+`success`, including one GitHub rejects before its first step under
+`shipmate-engine`'s deployment branch policy or protection rules, did not
+save, and a cell whose apply may have run is held.
 
 A pre-merge apply run reads its pull request before it writes. Once the pull
 request has merged, the run writes only its `success` and held writes and
@@ -206,11 +219,12 @@ The next apply or deploy of the cell reads the run that holds the check. When
 that run never applied the cell, a bare or targeted `shipmate apply` applies
 it, a merge deploy queues it, and an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
-**Last wave.** A level's last populated wave runs no `waveN-complete` job:
-`complete`, which runs right after it, alone writes its checks. A `complete`
-that fails, including one whose jobs listing still lags after its about 2
-minutes of retries, leaves them `in_progress`, linked to the run, and the next
-apply or deploy of the cell reads that run as the holder (table below):
+**Failed completion.** A check of a cell whose `save` did not write its
+`success` is written by the level's `complete` alone. A `complete` that fails,
+including one whose jobs listing still lags after its about 2 minutes of
+retries, leaves the level's failed and cancelled cells' checks `in_progress`,
+linked to the run, and the next apply or deploy of the cell reads that run as
+the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
   merge deploy queues it; an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells); comment
@@ -241,8 +255,8 @@ A merge deploy whose own `complete` fails this way leaves the checks
 
 **First level.** In an apply run, `apply-run.yml`'s `lock` snapshots the first
 populated env-level's checks and flips its `wave0`, so that level's `snapshot`
-and `wave0-release` jobs skip and its `waveN-complete` and `complete` jobs
-write on `lock`'s check ids. Every later level, and every level of a merge
+and `wave0-release` jobs skip and its cells' `save` jobs and its `complete`
+job write on `lock`'s check ids. Every later level, and every level of a merge
 deploy, snapshots and releases its own. When the first level's call never
 starts after `lock` ran (a run cancelled between them, or a `lock` that failed
 after its snapshot), `apply-run.yml`'s `unflip` job writes that level's `wave0`
@@ -501,7 +515,7 @@ off the pull request's checks list.
   - It costs a caller nothing, but not because it needs nothing: listing
     environments needs `actions: read` — on a private repository the default
     `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
-    call site already grants `actions: read` for its wave jobs, `waveN-complete` and `complete`, so
+    call site already grants `actions: read` for its wave jobs and `complete`, so
     the `uses:` permission cap is already high enough; `lock` requests
     `actions: read` and `checks: read` itself. A hand-written wrapper
     calling `apply-env-level.yml` must grant it. The environment check uses no
@@ -555,6 +569,11 @@ off the pull request's checks list.
   A `SHIPMATE_APP_PRIVATE_KEY` on a cell's apply environment fails that cell's
   `apply` at its first step, before any pull-request code runs:
   ``the environment <binding> holds SHIPMATE_APP_PRIVATE_KEY, which reaches pull-request code in this apply job; delete it there: it belongs on shipmate-engine alone``.
+  Delete the secret from that environment and keep the key on
+  `shipmate-engine` alone. Binding `shipmate-engine` subjects saving a cell's
+  state to that environment's deployment branch policy and protection rules: a
+  `save` job they reject fails before `Save the cell's state`, and a cell
+  whose apply may have run is held (§Apply check lifecycle).
 - For every name in the row's `tf_vars` — the layout's derived names plus the
   environment's own `vars` — the value `tofu` receives is the table's. A
   consuming repository's `terramate.config.run.env` may read any name, and may
@@ -1196,7 +1215,7 @@ job each request `id-token: write` and run
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
 except that a shared environment (`split: false`) resolves `aws.apply` on
-every path. The `snapshot`, `waveN-complete` and `complete` jobs and each apply
+every path. The `snapshot` and `complete` jobs and each apply
 cell's `save` job deliberately get no cloud credential.
 
 On the apply path the engine passes through whatever role the environment
@@ -2235,9 +2254,7 @@ A cancelled stale run writes, by where it waited:
   its own after the cancel: it never claimed its comment. Its `queue` job may
   already have posted a waits reply.
 - On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
-  so its `waveN-complete`, which runs on `success` or `failure` only and never for
-  the level's last populated wave, is skipped,
-  and the level's `complete` returns the wave's flipped checks to `queued` titled
+  so the level's `complete` returns the wave's flipped checks to `queued` titled
   `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
   they stay pending. `summary` runs after a
   successful `review`, posts the apply comment and refreshes the old head's gate,
@@ -2520,11 +2537,11 @@ reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <env> / <stack>`) — created pending by
-  `actions/summary`, completed by `actions/apply-complete` in
-  `apply-env-level.yml`'s `waveN-complete` jobs (none runs for a level's last
-  populated wave) and its `complete` job, and by `apply-run.yml`'s `unflip` for
+  `actions/summary`, completed by `actions/cell-complete` in each cell's `save`
+  job in `cell.yml`, by `actions/apply-complete` in `apply-env-level.yml`'s
+  `complete` job, and by `apply-run.yml`'s `unflip` for
   a first level whose call never started (all
-  bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
+  bound to `shipmate-engine`) — creator and completers each mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
   consistent). Release jobs, and `apply-run.yml`'s `lock` for the first
@@ -2598,7 +2615,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
     superseded deploy, unless a cell's apply check is titled `State not saved`
-    or its `save` job failed (`docs/troubleshooting.md`
+    or its `save` job's `Save the cell's state` step did not succeed (`docs/troubleshooting.md`
     §`The apply step ran and its state was not saved`).
 
   Plan runs of one head can write out of order. An older run's `summary` that
