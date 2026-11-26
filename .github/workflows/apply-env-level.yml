@@ -201,12 +201,13 @@ jobs:
       base_sha: ${{ inputs.base_sha }}
       deploy: ${{ inputs.deploy }}
       by_wave: ${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}
-    # Named, never `inherit`: see the envlevel0 job in apply-run.yml. The App key is the empty
-    # literal, so `apply` holds none and `save` reads its environment's.
+    # Named, never `inherit`: see the envlevel0 job in apply-run.yml. Do not map the App key to
+    # an empty literal: with "" here, `save` did not receive shipmate-engine's key (sample run
+    # 45911273841).
     secrets: &cell-secrets
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-      SHIPMATE_APP_PRIVATE_KEY: ""
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave1:
     needs: [snapshot, wave0, wave1-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' && needs.wave1-release.result == 'success' }}

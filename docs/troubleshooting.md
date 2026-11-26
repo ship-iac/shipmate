@@ -1397,16 +1397,21 @@ to a GitHub-hosted label, or move the stack to a remote backend
 (`CONTRACT.md` §State backend). When a cell's `save` job prints the same text,
 its apply may have run: follow §`The apply step ran and its state was not saved`.
 
-### `holds SHIPMATE_APP_PRIVATE_KEY, which reaches pull-request code in this apply job`
+### `reaches pull-request code in this apply job`
 
 A cell's `apply` job refused at its first step,
-`Refuse an apply job that holds the App key`, because the environment it binds
-(`<env>-apply`, or the bare `<env>` under `split: false`) holds a secret named
-`SHIPMATE_APP_PRIVATE_KEY`. The step ran before any pull-request code, printed
-no value, and applied nothing. Delete the secret from that environment:
-`gh secret delete SHIPMATE_APP_PRIVATE_KEY --env <binding> --repo <owner>/<repo>`.
-Keep the key on `shipmate-engine` alone (`docs/github-app.md` §5–6), then apply
-again: comment `shipmate apply`, or re-run the merge deploy.
+`Refuse an apply job that holds the App key`, because a secret named
+`SHIPMATE_APP_PRIVATE_KEY` reached it: from the environment it binds
+(`<env>-apply`, or the bare `<env>` under `split: false`), or from a
+repository or organization secret, which every wave passes to the cell. A
+repository- or organization-scoped key makes every `apply` refuse. The step
+ran before any pull-request code, printed no value, and applied nothing.
+Delete the secret where it is:
+`gh secret delete SHIPMATE_APP_PRIVATE_KEY --env <binding> --repo <owner>/<repo>`,
+or without `--env` for a repository secret, or with `--org <org>` for an
+organization secret. Keep the key only on `shipmate-engine`
+(`docs/github-app.md` §5–6), then apply again: comment `shipmate apply`, or
+re-run the merge deploy.
 
 ### `The apply step ran and its state was not saved`
 

@@ -33,11 +33,12 @@ CELL_WITH = {
     # Unparsed: an expression lookup ignores case, so `save` matches the check name exactly.
     "by_wave": "${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}",
 }
-#: The App key is the empty literal, so `apply` holds none and `save` reads its environment's.
+#: The App key passes through: with an empty literal, `save` did not receive shipmate-engine's key
+#: (sample run 45911273841).
 CELL_SECRETS = {
     "SHIPMATE_ENCRYPTION_KEY": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
     "SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}",
-    "SHIPMATE_APP_PRIVATE_KEY": "",
+    "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
 }
 #: The keys of a calling wave job. GitHub refuses `runs-on` and `environment` on a job that calls
 #: a workflow; a repeated `concurrency` group fails the call at once; a `cache-mode: read` there
@@ -80,8 +81,8 @@ SAVE = {
     ],
 }
 
-#: `apply`'s first step, whole. An environment secret wins over the caller's empty value, so a
-#: key on the apply environment would otherwise reach pull-request code.
+#: `apply`'s first step, whole. A key from the apply environment or a repository or organization
+#: secret would otherwise sit beside pull-request code.
 REFUSE_KEY = {
     "name": "Refuse an apply job that holds the App key",
     "env": {
@@ -90,9 +91,9 @@ REFUSE_KEY = {
     },
     "run": (
         'if [ -n "$KEY" ]; then\n'
-        '  echo "::error::the environment $BINDING holds SHIPMATE_APP_PRIVATE_KEY, which reaches '
-        "pull-request code in this apply job; delete it there: it belongs on shipmate-engine "
-        'alone"\n'
+        '  echo "::error::SHIPMATE_APP_PRIVATE_KEY reaches pull-request code in this apply job: '
+        "the environment $BINDING, or a repository or organization secret, holds it; delete it "
+        'there and keep the key only on shipmate-engine"\n'
         "  exit 1\n"
         "fi\n"
     ),
@@ -112,7 +113,8 @@ def test_every_wave_calls_the_cell_with_one_block():
     """Mutations: `stack: ${{ matrix.environment }}` on `wave3`; add `cache-mode: read` to
     `wave0`; `by_wave: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave)) }}`
     on `wave2` (re-serializing merges names differing only in case);
-    `${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}` for the empty literal in the shared secrets block."""
+    the empty literal `""` for the App key in the shared secrets block, which left `save` without
+    the key in sample run 45911273841."""
     jobs = workflow_jobs("apply-env-level.yml")
     found = {w: (set(jobs[w]), jobs[w]["uses"], jobs[w]["with"], jobs[w]["secrets"]) for w in WAVES}
     expected = (WAVE_KEYS, "./.github/workflows/cell.yml", CELL_WITH, CELL_SECRETS)

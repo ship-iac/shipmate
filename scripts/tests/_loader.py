@@ -72,13 +72,8 @@ ENGINE_CALL_SECRETS = {
     "apply-run.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "deploy.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "apply-env-level.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
-    # The App key is the empty literal: only `save`'s shipmate-engine binding supplies it, so
-    # `apply`, which runs pull-request code, holds none.
-    "cell.yml": {
-        **_CONSUMER_SECRETS,
-        "SHIPMATE_ENCRYPTION_KEY": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
-        "SHIPMATE_APP_PRIVATE_KEY": "",
-    },
+    # `save` completes the cell's check with the App key; `apply` refuses when it arrives there.
+    "cell.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.

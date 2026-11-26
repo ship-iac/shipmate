@@ -24,8 +24,7 @@ on:
         required: false
       SHIPMATE_SECRETS:
         required: false
-      # Every caller maps it to "": only `save`'s shipmate-engine binding supplies it, and `apply`
-      # refuses when its own environment does.
+      # `save` completes the cell's check with it; `apply` refuses when it arrives there.
       SHIPMATE_APP_PRIVATE_KEY:
         required: false
 # Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
@@ -48,15 +47,15 @@ jobs:
       state: ${{ steps.cell.outputs.state }}
       job_id: ${{ job.check_run_id }}
     steps:
-      # An environment secret wins over the caller's empty value, so a key on this job's
-      # environment would sit beside pull-request code. First, so nothing runs beside it.
+      # A key that reaches this job, from its environment or a repository or organization
+      # secret, would sit beside pull-request code. First, so nothing runs beside it.
       - name: Refuse an apply job that holds the App key
         env:
           KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           BINDING: ${{ fromJSON(inputs.cell).env_binding }}
         run: |
           if [ -n "$KEY" ]; then
-            echo "::error::the environment $BINDING holds SHIPMATE_APP_PRIVATE_KEY, which reaches pull-request code in this apply job; delete it there: it belongs on shipmate-engine alone"
+            echo "::error::SHIPMATE_APP_PRIVATE_KEY reaches pull-request code in this apply job: the environment $BINDING, or a repository or organization secret, holds it; delete it there and keep the key only on shipmate-engine"
             exit 1
           fi
       # Every attempt: an approval wait can last hours and a failed-jobs re-run skips `detect` and

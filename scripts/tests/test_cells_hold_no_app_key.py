@@ -75,25 +75,28 @@ def test_cell_never_references_the_app_private_key(action):
         assert APP_KEY_ENV not in text, f"{action} references {APP_KEY_ENV}: {text!r}"
 
 
-def test_only_snapshot_release_and_complete_jobs_read_the_app_key():
-    """None checks out repository content; every wave does, and maps the key to the empty
-    literal, which reads no secret.
+def test_every_level_job_passes_or_reads_the_app_key():
+    """`snapshot`, the releases and `complete` read it, none checking out repository content;
+    every wave passes it to `cell.yml`, whose `apply` reads it only to refuse
+    (`test_the_cell_workflow_reaches_the_app_key_only_in_these_steps`).
 
-    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave2-release`'s; map
-    `SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}` in `wave0`'s
-    `&cell-secrets`.
+    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave2-release`'s.
     """
-    # Expression references, not the dumped text: every wave names the key as a mapping key.
     reading = {
         n
         for n, job in workflow_jobs(LEVEL).items()
         if f"secrets.{APP_KEY_ENV}" in secrets_refs(job)
     }
-    assert reading == {"snapshot", "complete", *(f"wave{n}-release" for n in range(8))}
+    assert reading == {
+        "snapshot",
+        "complete",
+        *(f"wave{n}-release" for n in range(8)),
+        *(f"wave{n}" for n in range(8)),
+    }
 
 
 #: The only steps of `cell.yml` that reference the App key, by job: `apply`'s refusal, which
-#: reads it only to fail when its environment supplies it, and `save`'s check write.
+#: reads it only to fail when it arrives, and `save`'s check write.
 CELL_KEY_STEPS = {
     "apply": ["Refuse an apply job that holds the App key"],
     "save": ["Complete this cell's apply check"],
@@ -103,7 +106,8 @@ CELL_KEY_STEPS = {
 def test_the_cell_workflow_reaches_the_app_key_only_in_these_steps():
     """`cell.yml` declares the key optional, and every other step of either job, `apply`'s
     pull-request code included, names it nowhere. Mutations: pass the key to the apply-cell
-    step's `with:`; declare it `required: true`; drop the refusal step's `env:`."""
+    step's `with:`; add it to the `Pre-apply check` step's `env:`; declare it
+    `required: true`; drop the refusal step's `env:`."""
     doc = workflow_yaml("cell.yml")
     found = {
         name: [s.get("name") for s in job["steps"] if f"secrets.{APP_KEY_ENV}" in secrets_refs(s)]

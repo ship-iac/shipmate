@@ -565,16 +565,15 @@ off the pull request's checks list.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
-  The App key must be a `shipmate-engine` environment secret: every wave
-  passes `cell.yml` the empty literal, so `save` reads the key from its own
-  `shipmate-engine` binding alone, and a key stored only as a repository or
-  organization secret fails the `save` of every cell whose `apply` succeeded,
-  at `Verify the App key arrived`, which fails its wave.
-  A `SHIPMATE_APP_PRIVATE_KEY` on a cell's apply environment fails that cell's
-  `apply` at its first step, before any pull-request code runs:
-  ``the environment <binding> holds SHIPMATE_APP_PRIVATE_KEY, which reaches pull-request code in this apply job; delete it there: it belongs on shipmate-engine alone``.
-  Delete the secret from that environment and keep the key on
-  `shipmate-engine` alone. Binding `shipmate-engine` subjects saving a cell's
+  The App key must be a `shipmate-engine` environment secret. Every wave
+  passes the caller's `SHIPMATE_APP_PRIVATE_KEY` to `cell.yml`, so a key
+  stored as a repository or organization secret reaches every cell's `apply`,
+  as does one on a cell's apply environment. Either fails that `apply` at its
+  first step, before any pull-request code runs:
+  ``SHIPMATE_APP_PRIVATE_KEY reaches pull-request code in this apply job: the environment <binding>, or a repository or organization secret, holds it; delete it there and keep the key only on shipmate-engine``.
+  A repository- or organization-scoped key therefore makes every `apply`
+  refuse. Delete the secret where it is and keep the key only on
+  `shipmate-engine`. Binding `shipmate-engine` subjects saving a cell's
   state to that environment's deployment branch policy and protection rules: a
   `save` job they reject fails before `Save the cell's state`, and a cell
   whose apply may have run is held (§Apply check lifecycle).
