@@ -241,8 +241,8 @@ _CELL_DOWNLOAD = {
 
 
 def test_the_cell_summaries_download_is_bounded_and_never_blocks_the_comment():
-    """`!cancelled()`, not the implicit `success()`: the comment that reads the download posts
-    even when the job is red, so a failed earlier step must not skip the download.
+    """`!cancelled()`, the comment step's own condition, not the implicit `success()`: a step
+    later inserted before this one cannot silently skip the file the comment reads.
     `continue-on-error`: for comment-ops the comment is the feedback channel, so an artifact-API
     error must not skip it. `timeout-minutes` ends the 180 s a retried download holds the job.
     `pattern:` mode succeeds on zero matches, where `name:` throws.
