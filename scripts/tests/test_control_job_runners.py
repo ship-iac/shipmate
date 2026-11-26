@@ -35,6 +35,7 @@ EXPECTED = {
     ("apply.yml", "guard"): SLIM,
     ("apply.yml", "admit"): SLIM,
     ("apply-run.yml", "review"): SLIM,
+    ("apply-run.yml", "waiters"): SLIM,
     ("apply-run.yml", "detect"): INPUT,
     ("apply-run.yml", "lock"): INPUT,
     ("apply-run.yml", "unflip"): SLIM,

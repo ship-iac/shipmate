@@ -82,8 +82,22 @@ jobs:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      # Display only: a failure or a hung API call here must not fail review, and a refused
-      # review tells no one.
+
+  # Display only: no job needs it, and neither `summary`'s `results` nor `run_cancelled` reads
+  # it. A refused review tells no one.
+  waiters:
+    needs: [review]
+    if: ${{ needs.review.result == 'success' }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      - name: Verify the App key arrived
+        uses: $/actions/verify-app-key
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # A failure or a hung API call here must not fail the run.
       - name: Tell the apply runs waiting behind this one
         uses: $/actions/apply-waiters
         continue-on-error: true
@@ -382,8 +396,8 @@ jobs:
       posted: ${{ steps.result.outputs.posted }}
     steps:
       # Job steps, not composite ones, so `timeout-minutes` can end the run that
-      # actions/toolkit#2575 holds open for 180 s after a retried blob download. `!cancelled()`:
-      # the condition of the comment that reads these files.
+      # actions/toolkit#2575 holds open for 180 s after a retried blob download. `!cancelled()`: the
+      # comment reads these files and posts even when the job is red.
       - name: Download apply cell summaries
         id: download
         if: ${{ !cancelled() }}

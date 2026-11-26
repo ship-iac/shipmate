@@ -81,6 +81,7 @@ APPLY_JOBS = {
     APPLY: {"guard", "admit", "run", "outcome"},
     APPLY_RUN: {
         "review",
+        "waiters",
         "detect",
         "lock",
         "envlevel0",

@@ -176,6 +176,7 @@ ENGINE_BOUND_JOBS = {
     *(("apply-env-level.yml", f"wave{n}-release") for n in range(8)),
     ("apply-env-level.yml", "complete"),
     ("apply-run.yml", "review"),
+    ("apply-run.yml", "waiters"),
     ("apply-run.yml", "lock"),
     ("apply-run.yml", "unflip"),
     ("apply-run.yml", "summary"),

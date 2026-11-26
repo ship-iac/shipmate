@@ -98,7 +98,7 @@ inputs, so it identifies a run only when the App dispatched it: anyone who can
 dispatch the workflow chooses the inputs. The engine reads a title only for a
 `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
 `admit` lists a pull request's apply runs by it to cancel the stale ones and
-name the one a run waits behind, and `apply-run.yml`'s `review` lists them to
+name the one a run waits behind, and `apply-run.yml`'s `waiters` lists them to
 tell the runs waiting behind its run (§Comment-ops, "One apply run
 per pull request"), and `scripts/dispatch-body` looks for a comment's run by it before
 it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
@@ -532,7 +532,7 @@ off the pull request's checks list.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `admit` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
+  `admit` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
@@ -2033,7 +2033,7 @@ admit was skipped and no rule names why; comment 'shipmate apply' on the pull
 request`` when no check names one. `run` and `outcome` start only when `admit`
 wrote `admitted`. `run` calls `apply-run.yml`, which holds every job that reviews,
 detects, locks, applies or summarizes: `review` and `detect`, which run side by
-side, `lock`, `envlevel0` … `envlevel3` (named `L0` … `L3`), `unflip` and
+side, `waiters`, which runs after `review` and which no job needs, `lock`, `envlevel0` … `envlevel3` (named `L0` … `L3`), `unflip` and
 `summary`. `apply-run.yml` runs in the
 top-level concurrency group `shipmate-apply-<pr_number>` with
 `cancel-in-progress: false` and `queue: max`, so one apply run (`apply` or
@@ -2166,8 +2166,9 @@ A reply holding the first sentence starts with the line
 
 The run holding the group tells each waiting run too: a run's queue step can end
 before the run it then waits behind holds the group, and so names no holder, as
-when two commands arrive together. `apply-run.yml`'s `review`, as its last
-step, runs `actions/apply-waiters` (`scripts/apply-queue waiters`). It lists
+when two commands arrive together. `apply-run.yml`'s `waiters` job, which runs
+after a successful `review`, runs `actions/apply-waiters` (`scripts/apply-queue
+waiters`). It lists
 the same runs, then reads the jobs of each App-dispatched run other than its
 own whose title carries a comment; a run whose `<caller> / run / review` is
 `pending` waits for this one. Only when one
@@ -2181,13 +2182,14 @@ told gets one ⚪ reply:
 The reply's first line is ``<!-- shipmate:waits-<run id> -->``, `<run id>` the
 waiting run's. A waiting run counts as told when a comment by `<slug>[bot]`
 starts with that whole line, so the queue step's holder reply and the holder's
-`review` reply count as one. The step writes under the queue step's
+`waiters` reply count as one. The step writes under the queue step's
 `actor` rule, so a holder the App did not dispatch, or that a person re-ran,
 posts nothing; an `auto` holder replies. An `auto` waiting run has no comment and
 a run the App did not dispatch is not trusted; neither is told. The step is
 display only: a failed listing or POST warns and the step exits 0, and it holds
 `continue-on-error: true` and `timeout-minutes: 1`, so neither it nor a hung
-call fails `review`.
+call fails `waiters`. No job needs `waiters`, so `summary`'s result comment does
+not read it.
 
 A cancelled stale run writes, by where it waited:
 
@@ -2211,15 +2213,16 @@ These limits are accepted:
 - A run that changes status between two of the per-status listings, or within
   one listing between its page reads, can be missed, and is then neither
   cancelled nor named.
-- A waiting run whose call joins the group after the holder's `review` listed
-  the runs is not told by that holder; the next holder's `review` tells it if it
+- A waiting run whose call joins the group after the holder's `waiters` listed
+  the runs is not told by that holder; the next holder's `waiters` tells it if it
   still waits then.
 - The reply is display only: a waiting run that the queue step did not tell stays
   untold when the holder's waits step does not tell it: a failed or refused
-  `review` skips the step, and a failure inside the step can leave some runs untold.
+  `review` skips the `waiters` job, and a failure inside the step can leave some
+  runs untold.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
-- A waiting run can be told more than once, by the queue step and `review`,
+- A waiting run can be told more than once, by the queue step and `waiters`,
   when the comments listing does not yet show an earlier reply.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
@@ -2595,7 +2598,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
 - **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
-  `review` job, bound to `shipmate-engine`, as a pull
+  `waiters` job, bound to `shipmate-engine`, as a pull
   request comment for each App-dispatched apply run with a command comment
   waiting behind the run that holds the queue. Its
   `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting
@@ -3777,14 +3780,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-two, which run on
+  every engine job but thirty-three, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
-  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `admit` and `outcome`, `apply-run.yml`'s `review`, `unflip` and `summary`, `deploy.yml`'s `summary`,
+  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `admit` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-two
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-three
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -5131,8 +5134,8 @@ the conditions above hold for any other failed `review`, `outcome` runs with the
 refused text, and the reply still needs its own key check, mint and post. The reply is:
 
 - refused when `review` failed;
-- otherwise cancelled when `run-cancelled` is `true`: a job of
-  `apply-run.yml` other than `summary` ended `cancelled`, or the `run` job ended
+- otherwise cancelled when `run-cancelled` is `true`: `apply-run.yml`'s
+  `review`, `detect`, `lock` or `envlevel0` … `envlevel3` ended `cancelled`, or the `run` job ended
   `cancelled` or `skipped` and `review_result` is empty (the call was cancelled
   while it waited in the queue, or skipped by a run cancel; a call that failed
   before `review` reported gets the ended text);
@@ -5865,7 +5868,7 @@ env-levels, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (admit, or guard on a refused dispatch →
-`apply-run.yml`, one run per pull request at a time: review beside detect → cell lock acquisition and the first level's pre-flight and wave0 release →
+`apply-run.yml`, one run per pull request at a time: review beside detect, waiters after review → cell lock acquisition and the first level's pre-flight and wave0 release →
 env-levels 0..3 via `apply-env-level.yml` → unflip when the first level never started → result comment + gate refresh;
 then the outcome reply when no result comment posted; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one

@@ -902,3 +902,21 @@ def test_a_call_whose_unflip_runs_after_every_level_ended_holds_the_group():
         _job("unflip", "in_progress"),
     ]
     assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)
+
+
+def test_a_call_whose_waiters_runs_after_every_job_ended_holds_the_group():
+    """`waiters` runs inside the call, so the run holds the group until it ends; once it
+    completed, nothing holds.
+
+    Mutation: `_unfinished` skips jobs whose name ends `/ waiters` -- red."""
+    ended = [
+        _rv("completed"),
+        _job("detect", "completed"),
+        _job("lock", "completed"),
+        _job("L0 / dev / app / apply", "completed"),
+        _job("summary", "completed"),
+    ]
+    running = [*ended, _job("waiters", "in_progress")]
+    assert (aq.idle(running), aq.holds(running)) == (False, True)
+    done = [*ended, _job("waiters", "completed")]
+    assert (aq.idle(done), aq.holds(done)) == (False, False)

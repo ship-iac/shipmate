@@ -81,7 +81,7 @@ REVIEW_STEP = {
     "with": _with("start"),
 }
 
-#: `summary`'s step, whole: last, and run after a failed gate refresh.
+#: `summary`'s step, whole: last, after the comment and the gate refresh.
 SUMMARY_STEP = {
     "name": FINISH,
     "if": "${{ always() && steps.result.outputs.posted == 'true' }}",

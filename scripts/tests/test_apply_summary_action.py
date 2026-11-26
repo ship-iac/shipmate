@@ -241,7 +241,8 @@ _CELL_DOWNLOAD = {
 
 
 def test_the_cell_summaries_download_is_bounded_and_never_blocks_the_comment():
-    """`!cancelled()`: the condition of the comment that reads the download.
+    """`!cancelled()`, not the implicit `success()`: the comment that reads the download posts
+    even when the job is red, so a failed earlier step must not skip the download.
     `continue-on-error`: for comment-ops the comment is the feedback channel, so an artifact-API
     error must not skip it. `timeout-minutes` ends the 180 s a retried download holds the job.
     `pattern:` mode succeeds on zero matches, where `name:` throws.
@@ -491,8 +492,9 @@ def test_the_report_is_downloaded_by_exact_name_where_the_render_reads_it():
     """By the exact name detect output, not a `pattern`, to the directory the render step's
     `SHIPMATE_REPORT_PATH` names (pinned in `_RENDER_ENV`), and never with an empty name, which
     downloads every artifact of the run. A failed or timed-out download degrades: the render reads
-    the report as unread, renders the red line and never a green verdict. `!cancelled()`, as the
-    comment that reads it.
+    the report as unread, renders the red line and never a green verdict. `!cancelled()`, not the
+    implicit `success()`: the comment that reads it posts even when the job is red, so a failed
+    earlier step must not skip the download.
 
     Mutations: name `${{ inputs.report-artifact }}`; drop the name clause from the `if:`; drop
     `!cancelled()`; download to another path; drop `continue-on-error`; drop

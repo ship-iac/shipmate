@@ -3163,7 +3163,7 @@ this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 
 The run holding this pull request's apply queue posted this comment on the
 pull request. It links the waiting run, the apply command comment that started
-it, and the holding run. It comes from the holding run's `review` job, so
+it, and the holding run. It comes from the holding run's `waiters` job, so
 it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
@@ -3302,9 +3302,9 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-four jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+All thirty-five jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
 `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `admit` and `outcome`,
-`apply-run.yml` `review`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
+`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
 `wave0-complete` … `wave6-complete` and `complete`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
