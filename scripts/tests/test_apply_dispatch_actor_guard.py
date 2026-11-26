@@ -126,8 +126,8 @@ GUARD_STEPS = {
 #: The line `apply.yml`'s `guard` refuses with when `run` was skipped and every check passed:
 #: `run.if` and the check steps disagree, or the expression failed to evaluate.
 NO_RULE_LINE = (
-    "::error::apply refused: the run job's condition refused this dispatch and no rule names "
-    "why; comment 'shipmate apply' on the pull request"
+    "::error::apply refused: this dispatch did not meet the apply job's conditions and no rule "
+    "names why; comment 'shipmate apply' on the pull request"
 )
 #: The guard job's steps after `GUARD_STEPS`, as `(if, run)`. Unlock's is the started reaction,
 #: a `uses:` step that `test_claim_wiring.py` pins whole.
@@ -427,9 +427,8 @@ def test_apply_summary_is_gated_on_the_review_and_not_on_detect():
     on `detect`. So a bare `always()` would let a dispatch whose `review` refused the
     `pr_number`/`ref` binding mint the App key, comment on that pull request and refresh its
     gate. `review` runs the dispatch checks before it claims, and writes `admitted` only for the
-    run that owns the command, so a `taken` duplicate's successful `review` posts nothing.
-    Gating on
-    `needs.detect.result` instead is the opposite regression: it also silences every genuine
+    run that owns the command, so a `taken` duplicate's successful `review` posts nothing. Gating
+    on `needs.detect.result` instead is the opposite regression: it also silences every genuine
     detect failure, so the developer gets no failure comment and no gate refresh. The whole
     expression is pinned so either escape fails.
     Mutations: replace the review clause with `needs.detect.result == 'success'` -> red; drop

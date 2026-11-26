@@ -83,7 +83,7 @@ jobs:
           fi
       - name: Refuse a dispatch that no check explains
         run: |
-          echo "::error::apply refused: the run job's condition refused this dispatch and no rule names why; comment 'shipmate apply' on the pull request"
+          echo "::error::apply refused: this dispatch did not meet the apply job's conditions and no rule names why; comment 'shipmate apply' on the pull request"
           exit 1
 
   # Every apply job runs inside `apply-run.yml`, one run per pull request at a time; its `review`
