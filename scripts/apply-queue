@@ -2,12 +2,12 @@
 """Cancel this pull request's stale apply runs and say which run this one waits behind; with
 `waiters`, tell the runs waiting behind this one.
 
-Without an argument it runs in `apply.yml`'s `admit` job, before this run's call joins
-`shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `waiters` job, while this run
-holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
+Without an argument it runs in `apply.yml`'s `queue` job, beside this run's `run` call and
+outside `shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `waiters` job, while
+this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
-header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
-`SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
+header's environment), `SHIPMATE_AUTO` (`true` posts only the cancel sentences),
+`SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
 `pull-requests: write`, and `actions: write` for the queue or `actions: read` for `waiters`).
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted run,
@@ -18,11 +18,13 @@ approval or that cell's `save` listing no steps. An incomplete runs listing or a
 cancels nothing, and a failed first head read skips the jobs reads. Only a run whose own listed
 `ref` is the live head cancels: a run not at the live head is stale itself and leaves stale runs to
 a run at the live head; a run missing from its own listing cancels nothing. An untrusted run is
-never cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
+never cancelled. The queue reply names the holder and the untrusted run only while this run's
+own call waits for the group (`own_waits`, never read for an `auto` run), and starts with this
+run's `waits_marker` when it names the holder.
 
 `waiters` tells each App-dispatched run with a command comment whose call waits for the group,
-once per run across `admit`'s queue step and the `waiters` job: a run whose `waits_marker`
-starts a comment of `<slug>[bot]` is skipped.
+once per run across the `queue` and `waiters` jobs: a run whose `waits_marker` starts a
+comment of `<slug>[bot]` is skipped.
 
 Writes, a cancel or a reply, happen only when this run's `actor` and `triggering_actor` are
 both `<slug>[bot]`; the replies' sentences print to the log either way. Both modes only report
@@ -32,6 +34,7 @@ and tidy, so a failed read, cancel or reply warns and exits 0; the replies are i
 
 import os
 import sys
+import time
 
 from _shipmate import (
     REPO_RE,
@@ -52,7 +55,7 @@ ag = _load("apply-gate")
 rc = _load("reply-comment")
 uc = _load("upsert-comment")
 
-#: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `admit` and
+#: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
 
@@ -126,6 +129,34 @@ def holds(jobs):
     return bool(_unfinished(jobs)) and not _in_group_wait(jobs)
 
 
+#: Re-lists of this run's own jobs while its call's `review` is not listed yet, and the seconds
+#: between them: `queue` starts beside `run`, before GitHub may list the call's jobs.
+_OWN_RELISTS, _OWN_PAUSE = 3, 3
+
+
+def own_waits(repo, own):
+    """Whether this run's own call waits for `shipmate-apply-<pr_number>`, read from the call's
+    `review` in a complete jobs listing of run `own`: `pending` waits, `in_progress` or
+    `completed` does not. Any other listing (incomplete, no `review`, or `review` in another
+    status such as `queued`) is undecided: re-lists up to `_OWN_RELISTS` times, `_OWN_PAUSE`
+    seconds apart; still undecided, it warns and counts as a wait."""
+    for relist in range(_OWN_RELISTS + 1):
+        if relist:
+            time.sleep(_OWN_PAUSE)
+        jobs, complete = run_jobs(repo, own)
+        status = next((j["status"] for j in jobs if _is_review(j)), None) if complete else None
+        if status == "pending":
+            return True
+        if status in ("in_progress", "completed"):
+            return False
+    print(
+        f"::warning::could not tell whether run {own} waits for the group: no complete jobs "
+        "listing showed its review pending, running or done; the reply names the run it may "
+        "wait behind"
+    )
+    return True
+
+
 def _link(run_id):
     return current_run_url(str(run_id))
 
@@ -181,20 +212,31 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, pr, own, slug, self_by_app):
-    """`(sentences, named)`: the reply's sentences, after cancelling each stale run when
-    `self_by_app` and this run's own listed `ref` is the live head; `named` when they name the
-    run this one waits for."""
+def _while_waiting(repo, own, auto, *named):
+    """`named`, or as many Nones unless this run's own call waits for the group (`own_waits`,
+    read only when one is set). An `auto` run names none and reads nothing: its reply holds only
+    cancel sentences."""
+    if any(named) and (auto or not own_waits(repo, own)):
+        return (None,) * len(named)
+    return named
+
+
+def queue(repo, pr, own, slug, self_by_app, auto=False):
+    """`(sentences, named, cancelled)`: the reply's sentences, after cancelling each stale run
+    when `self_by_app` and this run's own listed `ref` is the live head; `named` when they name
+    the run this one waits for; `cancelled` the runs cancelled. The holder and the untrusted run
+    are named only as `_while_waiting` allows, read after the cancels."""
     runs, complete = apply_runs(repo, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
     if not complete:
-        return sentences(own, None, None, [], False), False
+        return sentences(own, None, None, [], False), False, []
     app_runs = [r for r in others if r["by_app"]]
     foreign = [r for r in others if not r["by_app"]]
     if head is None:
-        return sentences(own, None, (foreign or [None])[0], [], True), False
+        (untrusted,) = _while_waiting(repo, own, auto, (foreign or [None])[0])
+        return sentences(own, None, untrusted, [], True), False, []
     jobs = {r["id"]: run_jobs(repo, r["id"]) for r in app_runs}
     stale = [
         r for r in app_runs if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])
@@ -205,8 +247,11 @@ def queue(repo, pr, own, slug, self_by_app):
     kept = [r for r in app_runs if r not in cancelled]
     holding = [r for r in kept if holds(jobs[r["id"]][0])]
     earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
-    holder = (earlier or [None])[0]
-    return sentences(own, holder, (foreign or [None])[0], cancelled, True), holder is not None
+    holder, untrusted = _while_waiting(
+        repo, own, auto, (earlier or [None])[0], (foreign or [None])[0]
+    )
+    said = sentences(own, holder, untrusted, cancelled, True)
+    return said, holder is not None, cancelled
 
 
 def _comment_link(repo, pr, comment_id):
@@ -307,13 +352,36 @@ def main():
         reply(repo, pr, own, slug, self_by_app)
 
 
+def told(repo, pr, own, slug):
+    """Whether a comment of `<slug>[bot]` on pull request `pr` starts with run `own`'s
+    `waits_marker`: the holder's `waiters` told this run first. A failed listing warns and reads
+    as not told."""
+    marker = waits_marker(own)
+    try:
+        listed = uc.marker_comments(repo, pr, marker)
+    except SystemExit as exc:
+        print(f"::warning::could not list the comments of #{pr}: {one_line(exc.code)}")
+        return False
+    return any(c["login"] == f"{slug}[bot]" and c["head"].startswith(marker) for c in listed)
+
+
 def reply(repo, pr, own, slug, self_by_app):
     """`queue`, then its reply on pull request `pr`, under this run's `waits_marker` when it
-    names the run this one waits for."""
-    said, named = queue(repo, pr, int(own), slug, self_by_app)
+    names the run this one waits for. When the App already told this run (`told`), the reply
+    drops the marker and the waits sentence, and posts only the rest, if any. An `auto` run
+    posts only the cancel sentences, and nothing when it cancelled no run."""
+    auto = os.environ.get("SHIPMATE_AUTO") == "true"
+    said, named, cancelled = queue(repo, pr, int(own), slug, self_by_app, auto)
     for line in said:
         print(line)
-    if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
+    if auto:
+        said, named = (sentences(int(own), None, None, cancelled, True) if cancelled else []), False
+    if not said or not self_by_app:
+        return
+    # `sentences` puts the waits sentence first.
+    if named and told(repo, pr, own, slug):
+        said, named = said[1:], False
+    if not said:
         return
     marker = f"{waits_marker(own)}\n" if named else ""
     body = marker + rc.body(

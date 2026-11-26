@@ -330,11 +330,11 @@ def test_attempt_one_reads_no_earlier_attempt(env, monkeypatch):
 
 
 def test_an_apply_claim_never_reads_earlier_attempts(env, monkeypatch):
-    """`apply.yml` passes no owner job; its re-run is refused anyway. Mutation: drop `owner and`
+    """`apply-run.yml` passes no owner job; its re-run is refused anyway. Mutation: drop `owner and`
     from the read condition (an empty owner then never matches, but the read happens)."""
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     env.answer = _TAKEN
-    env.pages = {_page(1): [{"name": "apply / admit", "conclusion": "success"}]}
+    env.pages = {_page(1): [{"name": "apply / run / review", "conclusion": "success"}]}
     assert env.go() == 0
     assert env.reads == []
     assert env.outputs() == "state=taken\n"

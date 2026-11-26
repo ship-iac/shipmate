@@ -71,10 +71,11 @@ STEPS = [
     },
 ]
 
-#: `review`'s step, whole: after `rd`, with the default `if:`, so only a review that bound
-#: `ref` to the head starts a check.
+#: `review`'s step, whole: after `rd`, with no status function in its `if:`, so only a review
+#: that claimed the command and bound `ref` to the head starts a check.
 REVIEW_STEP = {
     "name": START,
+    "if": "${{ steps.admit.outputs.admitted == 'true' }}",
     "uses": USES,
     "continue-on-error": True,
     "timeout-minutes": 1,
@@ -124,7 +125,7 @@ def test_the_action_steps_are_whole():
 
 def test_review_starts_the_check_after_rd():
     """Mutations: drop `continue-on-error`; `mode: finish`; `head-sha: ${{ github.sha }}`;
-    move the step before `rd` -- each red."""
+    move the step before `rd`; drop its `if:` (a `taken` run starts a check) -- each red."""
     before, step = _site("apply-run.yml", "review")
     assert before["id"] == "rd"
     assert step == REVIEW_STEP

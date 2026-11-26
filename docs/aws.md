@@ -277,7 +277,7 @@ engine job but thirty-three:
 
 The input does not reach thirty-three jobs, which run on `ubuntu-slim` and run neither
 `tofu` nor `terramate`: `claim`, `facts`, `defer`, `defer-auto`, `gate-hold` and `outcome` in `plan.yml`; `guard`,
-`admit` and `outcome` in `apply.yml`; `review`, `waiters`, `unflip` and `summary` in `apply-run.yml`; `summary` in `deploy.yml`; `snapshot`,
+`queue` and `outcome` in `apply.yml`; `review`, `waiters`, `unflip` and `summary` in `apply-run.yml`; `summary` in `deploy.yml`; `snapshot`,
 `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete` in `apply-env-level.yml`; and
 `guard` and `result` in `unlock.yml`.
 
