@@ -60,8 +60,8 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   # Flips one wave's apply checks to in_progress right before it; the wave needs it, so no flip
-  # lands after the completion. Earlier waves and releases must be success or skipped, not merely
-  # uncancelled. A flip reads no check first, so it can reopen one another writer just completed.
+  # lands after the completion. Each later release requires every earlier wave and release to be
+  # success or skipped, not merely uncancelled. A flip reads no check first, so it can reopen one another writer just completed.
   wave0-release:
     needs: [snapshot]
     if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}

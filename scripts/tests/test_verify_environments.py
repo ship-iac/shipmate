@@ -185,7 +185,8 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
     assert _written(tmp_path) == f"refusal={_MISSING}\n"
 
 
-#: The action's own refusal for a listing that could not be read, hand-written.
+#: The action's own refusal for a listing that could not be read, hand-written. It must say a
+#: re-run clears a transient failure: one that reads as a bug gets fixed by softening the refusal.
 _UNLISTED = (
     "could not list this repository's GitHub Environments, so the apply-path environment "
     "pre-flight did not run; refusing to apply. A transient failure (a 5xx, a rate limit) clears "

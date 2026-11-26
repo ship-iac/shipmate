@@ -53,8 +53,8 @@ jobs:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
-      # The `unlock` job binds the same environment as the apply waves, so it needs the pre-flight
-      # apply-run.yml's `lock` and apply-env-level.yml's `snapshot` run. A failure fails `detect`,
+      # The `unlock` job binds the same environment as the apply waves, so it needs the same
+      # pre-flight that apply-run.yml's `lock` and apply-env-level.yml's `snapshot` run. A failure fails `detect`,
       # which `unlock`'s `!failure()` reads as "do not run".
       - name: Verify the unlock-path environment exists and carries a branch policy
         if: ${{ steps.d.outputs.cells != '[]' }}
