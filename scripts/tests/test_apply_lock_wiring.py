@@ -51,7 +51,7 @@ APP_KEY = {
 
 LOCK_JOB = {
     "needs": ["review", "detect"],
-    "if": "${{ !failure() && !cancelled() }}",
+    "if": "${{ !failure() && !cancelled() && needs.review.outputs.admitted == 'true' }}",
     "runs-on": "${{ inputs.runs_on }}",
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {"actions": "read", "checks": "read"},
@@ -123,7 +123,8 @@ def test_the_lock_job_acquires_every_level_with_the_engine_key():
     an `actions/checkout` step; drop the `refused_by_rule` output; swap `match` and
     `lock-acquire`; move the release before `l`; move `verify` after `snap`; key the
     snapshot's four-way on `envlevel1_empty`; `permissions: { actions: read, checks: write }`;
-    drop `steps.verify.outputs.refusal` from `refusal`."""
+    drop `steps.verify.outputs.refusal` from `refusal`; drop the `admitted` clause from `if:`, so
+    a `taken` run locks."""
     assert workflow_jobs("apply-run.yml")["lock"] == LOCK_JOB
 
 

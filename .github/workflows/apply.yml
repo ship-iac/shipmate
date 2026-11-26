@@ -20,14 +20,14 @@ on:
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_ENCRYPTION_KEY: { required: false }
 jobs:
-  # Names why `admit.if` refused the dispatch: the failing check step states its rule, and the
+  # Names why `run.if` refused the dispatch: the failing check step states its rule, and the
   # last step refuses when none does. A human cannot make github.actor a bot login, so the first
   # step stops a hand dispatch that would skip scripts/authorize. No secrets, environment or checkout.
   guard:
-    needs: [admit]
-    # A run cancelled before `admit` starts also leaves it skipped; `!cancelled()` keeps that run
+    needs: [run]
+    # A run cancelled before `run` starts also leaves it skipped; `!cancelled()` keeps that run
     # from refusing.
-    if: ${{ !cancelled() && needs.admit.result == 'skipped' }}
+    if: ${{ !cancelled() && needs.run.result == 'skipped' }}
     runs-on: ubuntu-slim
     permissions: {}
     steps:
@@ -61,7 +61,8 @@ jobs:
           echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
           exit 1
 
-      # An apply dispatch claims its comment in `admit`; one without a comment id would bypass it.
+      # An apply dispatch claims its comment in `apply-run.yml`'s `review`; one without a comment
+      # id would bypass the claim.
       - &reject-no-comment
         name: Reject an apply dispatch without a comment id
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '' }}
@@ -80,66 +81,18 @@ jobs:
             echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero); a workflow or App other than shipmate's comment-ops and autoplan sent this dispatch; comment 'shipmate apply' on the pull request instead"
             exit 1
           fi
-      - name: Refuse a skipped admit that no check explains
+      - name: Refuse a dispatch that no check explains
         run: |
-          echo "::error::apply refused: admit was skipped and no rule names why; comment 'shipmate apply' on the pull request"
+          echo "::error::apply refused: the run job's condition refused this dispatch and no rule names why; comment 'shipmate apply' on the pull request"
           exit 1
 
-  # A second run of the same comment reads `taken` and writes no `admitted`; an `auto` dispatch
-  # carries no `comment_id`, skips the claim and is admitted by that empty input. Outside the
-  # group, before this run joins it.
-  admit:
-    # `guard`'s check conditions negated, then the canonical-number test, so a refused dispatch
-    # binds no environment; an expression error skips the job too. The aliased steps below stay
-    # authoritative. test_apply_dispatch_actor_guard.py keeps the two in step.
-    if: ${{ !(!endsWith(github.actor, '[bot]')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto) && !(inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto')) && !(!inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '') && format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' && fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 && !contains(inputs.pr_number, '.') }}
-    runs-on: ubuntu-slim
-    environment: { name: shipmate-engine, deployment: false }
-    # Its writes use the App token; a job-token `actions: write` would fail every caller that
-    # grants `actions: read`.
-    permissions: {}
-    outputs:
-      admitted: ${{ steps.admit.outputs.admitted }}
-    steps:
-      # `guard`'s checks, before any step reads the App key.
-      - *reject-actor
-      - *reject-auto-without-form
-      - *reject-form-outside-auto
-      - *reject-non-apply
-      - *reject-no-comment
-      - *reject-pr-number
-      - id: claim
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
-        uses: $/actions/claim
-        with:
-          verb: apply
-          environment: ${{ inputs.environment }}
-          pr-number: ${{ inputs.pr_number }}
-          comment-id: ${{ github.event.inputs.comment_id }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      - id: admit
-        if: ${{ steps.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '' }}
-        run: echo "admitted=true" >> "$GITHUB_OUTPUT"
-      # Cancels this pull request's apply runs that wait at an older head and replies naming the
-      # run this one waits behind (scripts/apply-queue). Display only: `run` reads `admitted`,
-      # which a failed queue step leaves written.
-      - id: queue
-        if: ${{ steps.admit.outputs.admitted == 'true' }}
-        uses: $/actions/apply-queue
-        with:
-          pr-number: ${{ inputs.pr_number }}
-          environment: ${{ inputs.environment }}
-          auto: ${{ inputs.auto }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-
-  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time. `!cancelled()`
-  # keeps a run cancelled before it starts from queueing an apply. `admitted` alone admits: a failed
-  # queue step leaves it written, and a lost `admit` runner, `auto` included, leaves it empty.
+  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time; its `review`
+  # repeats `guard`'s check steps and claims the comment.
   run:
-    needs: [admit]
-    if: ${{ !cancelled() && needs.admit.outputs.admitted == 'true' }}
+    # `!cancelled()` keeps a cancelled run from queueing an apply. Then `guard`'s check conditions
+    # negated and the canonical-number test; an expression error skips the call too.
+    # test_apply_dispatch_actor_guard.py keeps the two in step.
+    if: ${{ !cancelled() && !(!endsWith(github.actor, '[bot]')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto) && !(inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto')) && !(!inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '') && format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' && fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 && !contains(inputs.pr_number, '.') }}
     uses: ./.github/workflows/apply-run.yml
     # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.
     permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
@@ -156,19 +109,46 @@ jobs:
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
+  # Cancels this pull request's apply runs that wait at an older head and replies naming the run
+  # this one waits behind (scripts/apply-queue). Display only: nothing needs it, and it may end
+  # after `run` joined the group. Same `if:` as `run` without `!cancelled()`.
+  queue:
+    if: ${{ !(!endsWith(github.actor, '[bot]')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto) && !(inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto')) && !(!inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '') && format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' && fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 && !contains(inputs.pr_number, '.') }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    # Its writes use the App token; a job-token `actions: write` would fail every caller that
+    # grants `actions: read`.
+    permissions: {}
+    # A lost runner or a setup error fails this job, not the run.
+    continue-on-error: true
+    timeout-minutes: 3
+    steps:
+      # `guard`'s checks, before any step reads the App key.
+      - *reject-actor
+      - *reject-auto-without-form
+      - *reject-form-outside-auto
+      - *reject-non-apply
+      - *reject-no-comment
+      - *reject-pr-number
+      - uses: $/actions/apply-queue
+        with:
+          pr-number: ${{ inputs.pr_number }}
+          environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
   # `always()`, not `!cancelled()`: it must answer a cancelled run too, and only job-level status
-  # functions see that cancel. Outside `apply-run.yml`'s group, so it also answers a run cancelled
-  # while it waited there. Holds the App key but checks nothing out.
+  # functions see that cancel. It answers only a run whose `review` wrote `admitted`, so a run
+  # cancelled while it waited in the group stays silent. Holds the App key but checks nothing out.
   outcome:
-    needs: [admit, run]
-    if: ${{ always() && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && needs.admit.outputs.admitted == 'true' }}
+    needs: [run]
+    if: ${{ always() && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && needs.run.outputs.admitted == 'true' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      # An output that did not arrive reads empty, never the refused text. A call cancelled or
-      # skipped before `review` reported counts as a cancel; a call that failed before it
-      # reported gets the ended text.
+      # An output that did not arrive reads empty, never the refused text.
       - id: reply
         uses: $/actions/outcome-reply
         with:
@@ -177,7 +157,7 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           review-result: ${{ needs.run.outputs.review_result }}
           summary-result: ${{ needs.run.outputs.summary_result }}
-          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || ((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && needs.run.outputs.review_result == '') }}
+          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Display only: nothing reads the check, so a failure here must not fail outcome.

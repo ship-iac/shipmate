@@ -78,7 +78,7 @@ UNLOCK_INPUTS = {
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {
-    APPLY: {"guard", "admit", "run", "outcome"},
+    APPLY: {"guard", "run", "queue", "outcome"},
     APPLY_RUN: {
         "review",
         "waiters",
@@ -150,23 +150,23 @@ REACHED_WORKFLOWS = {
 }
 
 #: The whole `if:` of each `envlevel*` job. The mode clause went with the input, and it must not
-#: come back as a verb clause either.
+#: come back as a verb clause either. `lock` skipped, as for a `taken` run, stops every level.
 ENVLEVEL_IF = {
     "envlevel0": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel1": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel2": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel3": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
 }
 
@@ -262,7 +262,8 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
     """Each level's whole `if:`, the cancel guard included: without it a level runs after a
     cancelled predecessor and applies out of `needs` order.
 
-    Mutation: drop the cancel guard from `envlevel2`'s `if:` -- red."""
+    Mutations: drop the cancel guard from `envlevel2`'s `if:` -- red; drop
+    `needs.lock.result == 'success'` from it -- red."""
     got = {job_id: _job(APPLY_RUN, job_id).get("if") for job_id in ENVLEVEL_IF}
     assert got == ENVLEVEL_IF, (
         f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "

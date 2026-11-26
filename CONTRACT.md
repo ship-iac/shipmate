@@ -532,7 +532,7 @@ off the pull request's checks list.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `admit` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
+  `queue` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
@@ -3796,7 +3796,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
   every engine job but thirty-three, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
-  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `admit` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
+  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A

@@ -49,7 +49,7 @@ UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 PLAN_KEY_HOLDERS = ("claim", "defer", "defer-auto", "summary", "gate-hold", "outcome")
 #: Every job with steps in apply.yml that references the App key, hand-written. `run` passes it
 #: to `apply-run.yml` and runs no step of its own.
-APPLY_KEY_HOLDERS = ("admit", "outcome")
+APPLY_KEY_HOLDERS = ("queue", "outcome")
 
 
 @pytest.mark.parametrize("action", CELLS)
@@ -128,7 +128,7 @@ def test_plan_workflow_key_holders_are_exactly_these_and_check_out_nothing():
 
 def test_apply_workflow_key_holders_are_exactly_these_and_check_out_nothing():
     """A key holder that checks out runs the dispatched ref's content beside the key. Mutations:
-    add an `actions/checkout` step to `admit`; pass the key to `guard`."""
+    add an `actions/checkout` step to `queue`; pass the key to `guard`."""
     jobs = workflow_jobs(WORKFLOWS / "apply.yml")
     holders = tuple(
         n for n, j in jobs.items() if "steps" in j and any(APP_KEY_ENV in s for s in strings(j))
@@ -180,7 +180,7 @@ ENGINE_BOUND_JOBS = {
     ("apply-run.yml", "lock"),
     ("apply-run.yml", "unflip"),
     ("apply-run.yml", "summary"),
-    ("apply.yml", "admit"),
+    ("apply.yml", "queue"),
     ("apply.yml", "outcome"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),

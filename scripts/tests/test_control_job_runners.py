@@ -33,7 +33,7 @@ EXPECTED = {
     ("cell.yml", "apply"): INPUT,
     ("cell.yml", "save"): INPUT,
     ("apply.yml", "guard"): SLIM,
-    ("apply.yml", "admit"): SLIM,
+    ("apply.yml", "queue"): SLIM,
     ("apply-run.yml", "review"): SLIM,
     ("apply-run.yml", "waiters"): SLIM,
     ("apply-run.yml", "detect"): INPUT,

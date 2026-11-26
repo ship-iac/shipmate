@@ -1,12 +1,13 @@
 """Only a bot actor may dispatch a verb; a human with write access must not
 bypass authorize by hand-rolling `gh workflow run apply.yml`/`unlock.yml`.
 
-In `apply.yml`, `admit.if` decides whether the `shipmate-engine` environment binds: it is each
-`guard` check step's condition negated, then the canonical `pr_number` test, so a dispatch any
-check refuses skips `admit` and binds no key. The bash steps stay authoritative: `admit` runs
-`guard`'s six check steps, by YAML alias, before its claim, and `run` and `outcome` start only
-from the `admitted` they gate. `guard` runs only when `admit` was skipped, and names the rule
-that refused, or refuses as no rule does.
+In `apply.yml`, the fence expression decides whether a dispatch reaches the `shipmate-engine`
+environment: it is each `guard` check step's condition negated, then the canonical `pr_number`
+test, and it is `queue.if` whole and `run.if` after `!cancelled()`, so a dispatch any check
+refuses skips both and binds no key. The bash steps stay authoritative: `queue` runs `guard`'s
+six check steps by YAML alias, and `apply-run.yml`'s `review` runs a copy of them, before any
+step reads the App key. `guard` runs only when `run` was skipped, and names the rule that
+refused, or refuses as no rule does.
 
 In `unlock.yml` the rejection is its own tiny job, `guard`, not a first step of `detect`, and
 every fan-out job carries `guard` in its `needs` so the rejection reaches its `!failure()`
@@ -122,11 +123,11 @@ GUARD_STEPS = {
         ),
     ],
 }
-#: The line `apply.yml`'s `guard` refuses with when `admit` was skipped and every check passed:
-#: `admit.if` and the check steps disagree, or the expression failed to evaluate.
+#: The line `apply.yml`'s `guard` refuses with when `run` was skipped and every check passed:
+#: `run.if` and the check steps disagree, or the expression failed to evaluate.
 NO_RULE_LINE = (
-    "::error::apply refused: admit was skipped and no rule names why; comment 'shipmate apply' "
-    "on the pull request"
+    "::error::apply refused: the run job's condition refused this dispatch and no rule names "
+    "why; comment 'shipmate apply' on the pull request"
 )
 #: The guard job's steps after `GUARD_STEPS`, as `(if, run)`. Unlock's is the started reaction,
 #: a `uses:` step that `test_claim_wiring.py` pins whole.
@@ -134,7 +135,8 @@ GUARD_TAIL = {
     "apply.yml": [(None, CANONICAL_PR_NUMBER_RUN), (None, _refuse(NO_RULE_LINE))],
     "unlock.yml": [(None, None)],
 }
-#: How many of `apply.yml`'s `guard` steps are checks `admit` repeats; the no-rule step follows.
+#: How many of `apply.yml`'s `guard` steps are checks `queue` and `review` repeat; the no-rule
+#: step follows.
 CHECK_STEP_COUNT = 6
 #: `inputs.pr_number` in canonical form, as an expression: it survives a number round trip
 #: unchanged (no leading zero, sign, exponent or space), is not the boolean `true` that
@@ -145,9 +147,9 @@ CANONICAL_PR_NUMBER_CLAUSE = (
     "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 "
     "&& !contains(inputs.pr_number, '.')"
 )
-#: `apply.yml`'s whole `admit.if`, hand-written: every check step's condition negated, then the
+#: `apply.yml`'s whole `queue.if`, hand-written: every check step's condition negated, then the
 #: canonical number clause. An expression error skips the job like a false one.
-ADMIT_IF = (
+FENCE_IF = (
     "${{ !(!endsWith(github.actor, '[bot]')) "
     "&& !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' "
     "&& !inputs.auto) "
@@ -162,12 +164,29 @@ ADMIT_IF = (
     "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 "
     "&& !contains(inputs.pr_number, '.') }}"
 )
-#: `apply.yml`'s whole `guard.if`. A run cancelled before `admit` starts also reads it
+#: `apply.yml`'s whole `run.if`: the fence after `!cancelled()`, which keeps a cancelled run from
+#: queueing an apply.
+RUN_IF = (
+    "${{ !cancelled() && !(!endsWith(github.actor, '[bot]')) "
+    "&& !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' "
+    "&& !inputs.auto) "
+    "&& !(inputs.auto && (github.event_name != 'workflow_dispatch' "
+    "|| github.event.inputs.verb != 'auto')) "
+    "&& !(!inputs.auto && (github.event_name != 'workflow_dispatch' "
+    "|| github.event.inputs.verb != 'apply')) "
+    "&& !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' "
+    "&& github.event.inputs.comment_id == '') "
+    "&& format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number "
+    "&& inputs.pr_number != 'true' "
+    "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 "
+    "&& !contains(inputs.pr_number, '.') }}"
+)
+#: `apply.yml`'s whole `guard.if`. A run cancelled before `run` starts also reads it
 #: skipped, and must not reach the no-rule step.
-GUARD_JOB_IF = "${{ !cancelled() && needs.admit.result == 'skipped' }}"
+GUARD_JOB_IF = "${{ !cancelled() && needs.run.result == 'skipped' }}"
 #: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path's `detect`
 #: reads the pull request's review decision itself, beside `review`, and `lock` needs both; it
-#: runs in `apply-run.yml`, which only `apply.yml`'s `run` starts, after `admit` admitted the
+#: runs in `apply-run.yml`, which only `apply.yml`'s `run` starts, after the fence passed the
 #: dispatch. `unlock.yml` has no `review` job: an approval reviews a diff and unlock applies none.
 #: Compared whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
 DETECT_NEEDS = {
@@ -213,16 +232,18 @@ DOWNSTREAM_NEEDS = {
     # nothing here mints the App key. `result` needs `guard` so a rejected dispatch skips it.
     "unlock.yml": {"unlock": ["guard", "detect"], "result": ["guard", "detect", "unlock"]},
 }
-SUMMARY_IF = "${{ always() && needs.review.result == 'success' }}"
+SUMMARY_IF = (
+    "${{ always() && needs.review.result == 'success' && needs.review.outputs.admitted == 'true' }}"
+)
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
 DISPATCH_PATHS = ("apply.yml", "unlock.yml")
-#: The whole `needs:` of each job in `apply.yml`: `admit` gates the call into `apply-run.yml`,
-#: and `guard` reads only whether `admit` was skipped.
+#: The whole `needs:` of each job in `apply.yml`: `run` and `queue` start at once, `guard` reads
+#: only whether `run` was skipped, and `outcome` reads `run`'s outputs.
 APPLY_NEEDS = {
-    "guard": ["admit"],
-    "admit": [],
-    "run": ["admit"],
-    "outcome": ["admit", "run"],
+    "guard": ["run"],
+    "run": [],
+    "queue": [],
+    "outcome": ["run"],
 }
 
 
@@ -255,41 +276,45 @@ def _body(expression):
     return expression[len("${{ ") : -len(" }}")]
 
 
-def test_admit_if_is_this_whole_expression():
-    """Mutations: delete the actor clause -- red; delete the `< 1e10` clause -- red; delete the
-    `!contains(inputs.pr_number, '.')` clause -- red."""
-    assert workflow_jobs("apply.yml")["admit"]["if"] == ADMIT_IF
+def test_the_fence_ifs_are_these_whole_expressions():
+    """Mutations: delete the actor clause from `queue.if` -- red; delete the `< 1e10` clause
+    from `run.if` -- red; drop `!cancelled() && ` from `run.if` -- red."""
+    jobs = workflow_jobs("apply.yml")
+    assert jobs["queue"]["if"] == FENCE_IF
+    assert jobs["run"]["if"] == RUN_IF
 
 
-def test_admit_if_negates_each_guard_check_step_in_order():
-    """Derived from the file, beside the hand-written pin above: a check step edited without
-    `admit.if` lets the expression bind the key for a dispatch the step refuses, or skip
-    `admit` for one it accepts. The canonical-number step has no `if:`; its clause is the
-    hand-written constant.
+def test_the_fence_negates_each_guard_check_step_in_order():
+    """Derived from the file, beside the hand-written pins above: a check step edited without the
+    fence lets the expression bind the key for a dispatch the step refuses, or skip `run` for
+    one it accepts. The canonical-number step has no `if:`; its clause is the hand-written
+    constant.
 
-    Mutation: `!= 'apply'` for `!= 'plan'` in `guard`'s fourth step, `admit.if` untouched --
+    Mutation: `!= 'apply'` for `!= 'plan'` in `guard`'s fourth step, both `if:`s untouched --
     red."""
     jobs = workflow_jobs("apply.yml")
     checks = jobs[GUARD_JOB]["steps"][:CHECK_STEP_COUNT]
     assert "if" not in checks[-1]
     clauses = [f"!({_body(step['if'])})" for step in checks[:-1]]
-    want = "${{ " + " && ".join([*clauses, CANONICAL_PR_NUMBER_CLAUSE]) + " }}"
-    assert jobs["admit"]["if"] == want
+    body = " && ".join([*clauses, CANONICAL_PR_NUMBER_CLAUSE])
+    assert jobs["queue"]["if"] == "${{ " + body + " }}"
+    assert jobs["run"]["if"] == "${{ !cancelled() && " + body + " }}"
 
 
-def test_admit_runs_guards_check_steps_before_anything_else():
-    """`admit`'s first six steps are `guard`'s check steps, so a dispatch `admit.if` wrongly
-    accepts still fails before the claim reads the App key. `test_apply_run_queue.py` pins the
-    steps after them whole.
+def test_queue_and_review_run_guards_check_steps_before_anything_else():
+    """`queue`'s and `apply-run.yml` `review`'s first six steps equal `guard`'s check steps,
+    parsed, so a dispatch the fence wrongly accepts still fails before any step reads the App
+    key. `review`'s are a copy: YAML anchors do not cross files.
 
-    Mutations: drop the canonical-number alias from `admit` -- red; move the six aliases after
-    `claim` -- red."""
-    jobs = workflow_jobs("apply.yml")
-    want = jobs[GUARD_JOB]["steps"][:CHECK_STEP_COUNT]
-    assert jobs["admit"]["steps"][:CHECK_STEP_COUNT] == want
+    Mutations: drop the canonical-number alias from `queue` -- red; `== 'auto'` for
+    `== 'plan'` in `review`'s second step -- red; move `review`'s six steps after `claim` --
+    red."""
+    want = workflow_jobs("apply.yml")[GUARD_JOB]["steps"][:CHECK_STEP_COUNT]
+    assert workflow_jobs("apply.yml")["queue"]["steps"][:CHECK_STEP_COUNT] == want
+    assert workflow_jobs("apply-run.yml")["review"]["steps"][:CHECK_STEP_COUNT] == want
 
 
-def test_guard_runs_only_when_admit_is_skipped():
+def test_guard_runs_only_when_run_is_skipped():
     """Mutations: `!cancelled()` for `always()` -- red; `== 'skipped'` for `!= 'skipped'`
     -- red."""
     assert workflow_jobs("apply.yml")[GUARD_JOB]["if"] == GUARD_JOB_IF
@@ -302,7 +327,8 @@ GUARD_PERMISSIONS = {"apply.yml": {}, "unlock.yml": {"pull-requests": "write"}}
 
 def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
     # It gates the App key, so it must not be able to reach one, name the environment that holds
-    # one, or execute the dispatcher's ref; `admit` runs the same check steps beside the key.
+    # one, or execute the dispatcher's ref; `queue` and `review` run the same check steps beside
+    # the key.
     # Mutation: `permissions: { contents: read }` on unlock's guard -- red.
     for name in DISPATCH_PATHS:
         job = workflow_jobs(name)[GUARD_JOB]
@@ -311,9 +337,12 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
         )
         assert job.get("environment") is None, f"{name}: {GUARD_JOB} must name no environment"
         assert job.get("secrets") is None, f"{name}: {GUARD_JOB} must be passed no secrets"
-    admit_checks = workflow_jobs("apply.yml")["admit"]["steps"][:CHECK_STEP_COUNT]
+    checks = [
+        *workflow_jobs("apply.yml")["queue"]["steps"][:CHECK_STEP_COUNT],
+        *workflow_jobs("apply-run.yml")["review"]["steps"][:CHECK_STEP_COUNT],
+    ]
     steps = [s for name in DISPATCH_PATHS for s in workflow_jobs(name)[GUARD_JOB]["steps"]]
-    for step in [*steps, *admit_checks]:
+    for step in [*steps, *checks]:
         assert "checkout" not in str(step.get("uses", "")).lower()
         assert "secrets." not in str(step.get("run", ""))
 
@@ -322,10 +351,10 @@ def test_every_fan_out_job_carries_the_guard_in_its_needs():
     """A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s outputs are empty
     strings, which `needs.detect.outputs.*_empty != 'true'` reads as "not empty". In `unlock.yml`
     `guard` in each job's `needs` is what makes the rejection visible to its `!failure()`
-    clause. In `apply.yml` every apply job sits behind `run`, which needs `admit`; `apply-run.yml`
-    holds no `guard`, so its jobs' needs are pinned by `DOWNSTREAM_NEEDS` instead.
+    clause. In `apply.yml` every apply job sits behind `run`, whose `if:` is the fence;
+    `apply-run.yml` holds no `guard`, so its jobs' needs are pinned by `DOWNSTREAM_NEEDS` instead.
 
-    Mutations: add `guard` to `apply.yml`'s `run` `needs:` -- red; add `needs: [review]` to
+    Mutations: add `queue` to `apply.yml`'s `run` `needs:` -- red; add `needs: [review]` to
     `apply-run.yml`'s `detect` -- red."""
     for name, expected in DETECT_NEEDS.items():
         got = _needs(workflow_jobs(name)["detect"])
@@ -397,12 +426,14 @@ def test_apply_summary_is_gated_on_the_review_and_not_on_detect():
     `summary`'s steps read raw workflow_call inputs (pr_number, ref) rather than anything gated
     on `detect`. So a bare `always()` would let a dispatch whose `review` refused the
     `pr_number`/`ref` binding mint the App key, comment on that pull request and refresh its
-    gate. `apply-run.yml` starts only after `admit` admitted the dispatch, so `review`'s success
-    implies the checks passed. Gating on
+    gate. `review` runs the dispatch checks before it claims, and writes `admitted` only for the
+    run that owns the command, so a `taken` duplicate's successful `review` posts nothing.
+    Gating on
     `needs.detect.result` instead is the opposite regression: it also silences every genuine
     detect failure, so the developer gets no failure comment and no gate refresh. The whole
     expression is pinned so either escape fails.
-    Mutation: replace the review clause with `needs.detect.result == 'success'` -> red."""
+    Mutations: replace the review clause with `needs.detect.result == 'success'` -> red; drop
+    the `admitted` clause -> red."""
     job = workflow_jobs("apply-run.yml")["summary"]
     summary_if = job.get("if")
     assert summary_if == SUMMARY_IF, (

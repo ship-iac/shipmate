@@ -289,40 +289,30 @@ def test_the_composite_mints_only_a_pull_request_write_token():
 
 
 def test_the_apply_outcome_job_is_wired_exactly():
-    """`always()`: it must run after a run cancel, including one while the call waited in
-    `apply-run.yml`'s queue. Every fact about the inner run arrives through `run`'s outputs, which
-    read empty when they did not arrive; `admit` refuses an empty `pr_number`. `run-cancelled`
-    also reads a call that ended `cancelled` or `skipped` with an empty `review_result` as a
-    cancel: it was cancelled while queued, or skipped by a run cancel. A call that failed before
-    `review` reported keeps the ended text.
+    """`always()`: it must run after a run cancel. Every fact about the inner run arrives through
+    `run`'s outputs, which read empty when they did not arrive.
 
     A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 
-    Mutations: drop `&& needs.run.outputs.posted != 'true'`; drop
-    `needs.run.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
-    drop `run` from `needs`; `permissions: { pull-requests: write }`; pass
-    `needs.run.outputs.review_result` as `summary-result`; replace `always()` with
-    `!cancelled()`; widen the call-result clause to `needs.run.result != 'success'` (a call that
-    failed before `review` reported reads as cancelled); drop its `needs.run.result ==
-    'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a call
-    that ended `cancelled` after `review` succeeded, with `run_cancelled` false, reads as
-    cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
-    clause (a mid-run cancel reads as ended). The admission clause: a run cancelled after `admit`
-    wrote `admitted` still replies, because `always()` stays, even when its queue step was
-    cancelled; a `taken` run (another run of the comment owns it), a failed claim, which
-    replied itself, and a dispatch `admit` refused do not; nor does a run whose `admit` runner
-    was lost, `auto` included. Mutations: drop the admission clause; drop `admit` from
-    `needs`; compare `admitted` with `!= 'false'` (an empty output would reply); append
-    `|| github.event.inputs.comment_id == ''` to it (an `auto` run refused by a check step would
-    reply); key it on `needs.admit.result == 'success'` (a failed queue step would skip the
-    reply). The constant pins each: the expression is never evaluated here."""
+    The ownership clause: only a run whose `review` wrote `admitted` replies, a cancelled one
+    included, because `always()` stays. A refused dispatch, a `taken` run (another run of the
+    comment owns it), a failed claim, which replied itself, a run cancelled before its claim and
+    a run whose `review` runner was lost do not. `admitted` and `review_result` both come from
+    `review`, so once `admitted` is required `review_result` is never empty: `run-cancelled` is
+    `run_cancelled` alone.
+
+    Mutations: drop the `admitted` clause; drop `&& !inputs.auto`; drop
+    `&& needs.run.outputs.posted != 'true'`; flip the `unbound` clause's `!=` to `==`;
+    `permissions: { pull-requests: write }`; replace `always()` with `!cancelled()`; pass
+    `'true'` as `run-cancelled`. The constant pins each: the expression is never evaluated
+    here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
-        "needs": ["admit", "run"],
+        "needs": ["run"],
         "if": (
             "${{ always() && needs.run.outputs.posted != 'true' && "
             "(needs.run.outputs.review_result != 'failure' || "
             "(needs.run.outputs.unbound != 'true' && !inputs.auto)) && "
-            "needs.admit.outputs.admitted == 'true' }}"
+            "needs.run.outputs.admitted == 'true' }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -337,11 +327,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "pr-number": "${{ inputs.pr_number }}",
                     "review-result": "${{ needs.run.outputs.review_result }}",
                     "summary-result": "${{ needs.run.outputs.summary_result }}",
-                    "run-cancelled": (
-                        "${{ needs.run.outputs.run_cancelled == 'true' || "
-                        "((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && "
-                        "needs.run.outputs.review_result == '') }}"
-                    ),
+                    "run-cancelled": "${{ needs.run.outputs.run_cancelled == 'true' }}",
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
                 },

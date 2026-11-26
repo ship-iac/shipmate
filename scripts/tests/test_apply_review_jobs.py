@@ -54,6 +54,7 @@ _REVIEW_JOB = {
     "outputs": {
         "decision": "${{ steps.rd.outputs.decision }}",
         "unbound": "${{ steps.rd.outputs.unbound }}",
+        "admitted": "${{ steps.admit.outputs.admitted }}",
     },
 }
 
@@ -187,6 +188,7 @@ def test_the_pr_read_action_declares_exactly_these_outputs():
 _READ_SITES = {
     "review": {
         "id": "rd",
+        "if": "${{ steps.admit.outputs.admitted == 'true' }}",
         "uses": "$/actions/apply-pr-read",
         "with": {
             "token": "${{ steps.token.outputs.token }}",

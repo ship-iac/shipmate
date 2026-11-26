@@ -33,6 +33,10 @@ repeats a plan, so a missing key plans, and its read step warns on the empty tok
 
 `auto-dispatch` carries the call under its deferred-mode `if:`. Called with the environments
 already decided, its caller `summary` verified the key as its own first step.
+
+`apply-run.yml`'s `review` makes the call ninth, under the `admitted` gate: its six dispatch
+checks read no key, its claim step verifies the key inside `actions/claim`, and its `admit` step
+reads none. A run whose claim reads `taken` mints nothing more.
 """
 
 from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
@@ -115,7 +119,13 @@ _SITES = {
 _DEGRADING = {ACTIONS / "plan-defer" / "action.yml"}
 
 #: Sites whose call carries an `if:`; the module docstring says why.
-_CONDITIONAL = {ACTIONS / "auto-dispatch" / "action.yml": "${{ inputs.deferred-to != '' }}"}
+_CONDITIONAL = {
+    ACTIONS / "auto-dispatch" / "action.yml": "${{ inputs.deferred-to != '' }}",
+    WORKFLOWS / "apply-run.yml": "${{ steps.admit.outputs.admitted == 'true' }}",
+}
+
+#: Sites whose call is not their first step, by index; the module docstring says why.
+_POSITION = {WORKFLOWS / "apply-run.yml": 8}
 
 
 def _minting_files():
@@ -146,12 +156,12 @@ def test_the_mint_sites_are_the_ones_this_guard_knows_about():
 def test_every_mint_site_verifies_the_key_arrived():
     """Mutations: delete the call from one site, or wire its `private-key` to the app id; move
     `apply-snapshot`'s call after its `snap` step; drop `plan-defer`'s `continue-on-error`; drop
-    `auto-dispatch`'s `if:`."""
+    `auto-dispatch`'s `if:`; drop the `if:` from `apply-run.yml` `review`'s call."""
     for path, site in _SITES.items():
         if site is None:
             continue
         keys, with_ = site
-        step = _steps(path, keys)[0]
+        step = _steps(path, keys)[_POSITION.get(path, 0)]
         expected = _call(with_) | ({"continue-on-error": True} if path in _DEGRADING else {})
         expected |= {"if": _CONDITIONAL[path]} if path in _CONDITIONAL else {}
         assert step == expected, (
