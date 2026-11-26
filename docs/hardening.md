@@ -15,8 +15,8 @@ engine counts (row 3), submits no App review and
 completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
 — but the gate's verdict is still computed from artifacts the branch's own plan
 run produced (see "What none of this fixes"). It can still dispatch the apply
-and unlock verbs with its own `GITHUB_TOKEN`, which `apply.yml`'s `admit` job
-and `unlock.yml`'s `guard` job admit as a bot actor. The apply dispatch is bound
+and unlock verbs with its own `GITHUB_TOKEN`, which `apply.yml`'s `run` job
+and `unlock.yml`'s `guard` job pass as a bot actor. The apply dispatch is bound
 to a pull request: the `review` and `detect` jobs each refuse it unless the pull request is open,
 not a draft, from this repository, and its head commit is the dispatched `ref`,
 and detect refuses a cell whose apply check records another pull request or
@@ -24,11 +24,12 @@ none (`CONTRACT.md` §Comment-ops). An apply dispatch that passes `review`
 holds its pull request's apply queue for its whole run, so the pull request's
 other apply runs wait behind it; sending one needs write access to the
 repository. Any bot-actor apply dispatch with a canonical `pr_number` takes a
-slot in that queue once `admit` admits it, before `review` runs, so a flood of 101
-such dispatches into an idle group (one runs, 100 wait), or 100 behind a run
-already holding it, makes a real `shipmate apply` arrive at a full queue and be
+slot in that queue once `run`'s condition passes it, before `review` claims its
+comment or refuses it, and holds the queue while its `detect` runs before it
+ends, so a flood of 101 such dispatches into an idle group (one runs, 100
+wait), or 100 behind a run already holding it, makes a real `shipmate apply` arrive at a full queue and be
 cancelled. Both the flood and the single held run need write access to the
-repository. `apply.yml`'s `admit` job never cancels such a run: it cancels only
+repository. `apply.yml`'s `queue` job never cancels such a run: it cancels only
 runs whose `actor` is the shipmate App's bot login, and it writes nothing, no
 cancel and no reply, unless its own run's `actor` and `triggering_actor` are both
 that login; its reply names such a run as one shipmate did not dispatch.
@@ -39,7 +40,7 @@ login, and writes under the same rule for its own run (`CONTRACT.md`
 with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
 needs only write access and runs the same init over a pull request head; write
 access and the `<env>-apply` environment's reviewers bound both. It can also
-dispatch `verb: auto`, which `admit` admits and `detect` refuses: an `auto` run
+dispatch `verb: auto`, which `run`'s condition passes and `detect` refuses: an `auto` run
 must run as the shipmate App's own bot login, compared whole, and a
 `GITHUB_TOKEN` dispatch runs as `github-actions[bot]` (`CONTRACT.md`
 §`apply_mode: auto`).

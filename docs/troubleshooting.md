@@ -2288,12 +2288,13 @@ request's current head commit is the dispatched `ref`, compared whole. A push
 landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
-A run refused or cancelled in `review`, or cancelled while it waited in the
-pull request's apply queue, posts no apply comment and leaves the gate as it
-was. It posts a `🔴` reply on the pull request instead, which links
-the run: `its review check stopped the apply run before any cell
-applied` for a refusal, `the apply run was cancelled before it posted a
-result` for a cancel (`CONTRACT.md` §Outcome reply).
+A run refused or cancelled in `review` after it claimed the command posts no
+apply comment and leaves the gate as it was. It posts a `🔴` reply on the pull
+request instead, which links the run: `its review check stopped the apply run
+before any cell applied` for a refusal, `the apply run was cancelled before it
+posted a result` for a cancel. A run cancelled while it waited in the pull
+request's apply queue, or in `review` before its claim was recorded, posts
+nothing at all; comment `shipmate apply` again (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it posted, for example
 at a full gate-writer queue for the head, also posts no apply comment. It
@@ -2524,7 +2525,7 @@ drift sweep reports that state.
 
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
-`apply.yml` skipped `admit`, and its `guard` job refused the dispatch before the run joined any
+`apply.yml` skipped `run`, and its `guard` job refused the dispatch before the run joined any
 apply queue, and nothing applied. The dispatch's `pr_number` is not 1 to 10
 digits without a leading zero. shipmate's comment-ops and autoplan never send
 such a number, and a hand-made dispatch is refused earlier by the bot-actor
@@ -2534,7 +2535,7 @@ App. Find that workflow or App and stop it dispatching `shipmate.yml`; comment
 
 ### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
 
-`apply.yml` skipped `admit`, and its `guard` job refused the autoplan's dispatch because the
+`apply.yml` skipped `run`, and its `guard` job refused the autoplan's dispatch because the
 `auto` job in `shipmate.yml` does not pass `auto: true`. Without it the run
 would be a bare apply with none of the `auto` checks. Nothing applied. Give the
 `auto` job the published `with:` block (`auto: true`, `ref`, `pr_number`,
@@ -3120,36 +3121,38 @@ the run stopped (`CONTRACT.md` §Comment-ops, "Reactions and the comment
 claim"):
 
 - 👀 and no 🚀: no run claimed the command. An apply run's `guard` refused it,
-  the run failed at startup, its `claim` job (`admit` in an apply run) failed
-  at the App key check or token mint (no reply is possible there), or every job
-  was skipped
-  (§A dispatched verb produced a run in which every job was skipped).
+  the run failed at startup, its claim (the `claim` job, or the claim step of
+  `review` in an apply run) failed at the App key check or token mint (no reply
+  is possible there), or every job was skipped
+  (§A dispatched verb produced a run in which every job was skipped). An apply
+  run claims only once it leaves its pull request's apply queue: one still
+  waiting behind an earlier apply run shows `pending` in the API and claims when
+  it starts, and one cancelled while it waited never claims and posts nothing
+  (`CONTRACT.md` §Comment-ops, "One apply run per pull request"); comment
+  `shipmate apply` again.
 - 👀 and 🚀: a run owns the command, and its `outcome` job shows why it did not
   answer: skipped (`CONTRACT.md` §Outcome reply lists when), failed at its key
   check or token mint, or green with a `could not post the no-result reply`
-  warning. An apply run that has not ended may still wait behind an earlier
-  apply run of the same pull request: the API reports its status as `pending`
-  while it waits, and it answers once it runs (`CONTRACT.md` §Comment-ops, "One
-  apply run per pull request"). A commented apply whose `admit` runner was lost
-  after the 🚀 shows `apply / admit` failed and skips `run` and `outcome`:
-  comment `shipmate apply` again.
+  warning. A commented apply whose `review` runner was lost after the 🚀, or
+  that was cancelled after the 🚀 and before `review` recorded the claim, skips
+  `outcome` and posts nothing: comment `shipmate apply` again.
 
-A run whose `claim` job (`admit` in an apply run) summary says another run of
+A run whose claim (the `claim` job, or `review` in an apply run) summary says another run of
 this comment owns it did no work by design; the run that owns the comment answers. "Re-run all jobs" of the
 plan run that owns the comment plans again, because GitHub deleted that run's
 plan artifacts; of a run that lost the claim it does nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
-`guard`, or an `admit` whose check step refused, names its refusal in an `apply refused:` annotation; a failed `claim`, `admit`,
+`guard`, or a `review` or `queue` whose check step refused, names its refusal in an `apply refused:` annotation; a failed `claim`,
 `facts` or `review` names it in its job log. A startup failure shows on the run
 page with no jobs started, with GitHub's error for the workflow file.
 
 ### `could not claim this command for its run, so the command was not started`
 
 The pull request carries ``🔴 failed: could not claim this command for its run,
-so the command was not started. Comment it again.``. The dispatched run's `claim`
-job (`admit` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
+so the command was not started. Comment it again.``. The dispatched run's claim
+(the `claim` job, or `review` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
 than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
 claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
 the answer. Comment the command again. Re-running a `shipmate plan` run
@@ -3164,6 +3167,9 @@ once that run and any run queued before this one end. The reply links the run
 it waits behind. That run may itself wait on an `<env>-apply` environment's
 approval: approve or reject it there, or cancel it from its run page, to let
 this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
+A run that will not own its command, such as a second run of the same comment,
+can get this reply before it reads the claim taken; it then ends having done
+nothing.
 
 ### `waits for the apply run of this pull request to finish`
 
@@ -3173,7 +3179,8 @@ it, and the holding run. It comes from the holding run's `waiters` job, so
 it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
-cancelled from that run's page.
+cancelled from that run's page. A waiting run that will not own its command
+gets this reply too, and ends having done nothing once it starts.
 
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 
@@ -3198,7 +3205,7 @@ the current head's, which carries its own apply checks.
 The list of this pull request's apply runs failed or came back malformed, or a
 run the shipmate App dispatched carries a title outside the grammar in
 `CONTRACT.md` §Check names, so this run cancelled nothing and cannot say what it
-waits behind; the `admit` job's log has the warning. When it happens on every
+waits behind; the `queue` job's log has the warning. When it happens on every
 apply, `shipmate.yml`'s `run-name` is not the published one: re-pin it with
 `python <engine>/scripts/repin <consumer> <tag> --write-fence`, after reading the
 diff it prints. The run still starts once the apply queue frees.

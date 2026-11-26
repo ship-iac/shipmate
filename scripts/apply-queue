@@ -2,9 +2,9 @@
 """Cancel this pull request's stale apply runs and say which run this one waits behind; with
 `waiters`, tell the runs waiting behind this one.
 
-Without an argument it runs in `apply.yml`'s `admit` job, before this run's call joins
-`shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `waiters` job, while this run
-holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
+Without an argument it runs in `apply.yml`'s `queue` job, beside this run's `run` call and
+outside `shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `waiters` job, while
+this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
 header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
 `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
@@ -18,11 +18,12 @@ approval or that cell's `save` listing no steps. An incomplete runs listing or a
 cancels nothing, and a failed first head read skips the jobs reads. Only a run whose own listed
 `ref` is the live head cancels: a run not at the live head is stale itself and leaves stale runs to
 a run at the live head; a run missing from its own listing cancels nothing. An untrusted run is
-never cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
+never cancelled. The queue reply names the holder only while this run's own call waits for the
+group (`own_waits`), and then starts with this run's `waits_marker`.
 
 `waiters` tells each App-dispatched run with a command comment whose call waits for the group,
-once per run across `admit`'s queue step and the `waiters` job: a run whose `waits_marker`
-starts a comment of `<slug>[bot]` is skipped.
+once per run across the `queue` and `waiters` jobs: a run whose `waits_marker` starts a
+comment of `<slug>[bot]` is skipped.
 
 Writes, a cancel or a reply, happen only when this run's `actor` and `triggering_actor` are
 both `<slug>[bot]`; the replies' sentences print to the log either way. Both modes only report
@@ -53,7 +54,7 @@ ag = _load("apply-gate")
 rc = _load("reply-comment")
 uc = _load("upsert-comment")
 
-#: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `admit` and
+#: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
 

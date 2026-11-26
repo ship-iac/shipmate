@@ -317,8 +317,8 @@ def post(sha, state, description, before_retry=None):
     re-check nothing, nor do `publishing` and `end`. `hold`, `publishing` and `end` write a
     hold, so their re-posts green nothing. A `deploy` write,
     first POST or retry, covers any hold written on the merged head before it, whether a plan run
-    wrote it in the gate group (a run admitted before the merge can write one after it) or
-    `gate-hold` wrote it outside the group. The merged head's gate then gates no merge unless
+    wrote it in the gate group (a run that joined the group before the merge can write one after
+    it) or `gate-hold` wrote it outside the group. The merged head's gate then gates no merge unless
     another open pull request shares that head.
 
     Newlines in `description` become spaces: a status description is one line, and `is_transient`
