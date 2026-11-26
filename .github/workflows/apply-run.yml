@@ -144,7 +144,7 @@ jobs:
   # it. A refused review tells no one.
   waiters:
     needs: [review]
-    if: ${{ needs.review.result == 'success' && needs.review.outputs.admitted == 'true' }}
+    if: ${{ needs.review.result == 'success' }}
     runs-on: ubuntu-slim
     # Bounds a hung setup; it does not bound runner pickup or a lost runner.
     timeout-minutes: 3

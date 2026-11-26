@@ -27,11 +27,12 @@ WAITERS_STEP = {
     "with": _WITH,
 }
 
-#: The `waiters` job minus its steps, whole: only after a bound review of the run that owns the
-#: command, no token of its own.
+#: The `waiters` job minus its steps, whole: only after a bound review, whether or not the run
+#: owns its command, since a run holding the group is what the waiting runs wait for; no token of
+#: its own.
 WAITERS_JOB = {
     "needs": ["review"],
-    "if": "${{ needs.review.result == 'success' && needs.review.outputs.admitted == 'true' }}",
+    "if": "${{ needs.review.result == 'success' }}",
     "runs-on": "ubuntu-slim",
     "timeout-minutes": 3,
     "continue-on-error": True,
@@ -81,8 +82,8 @@ def test_the_waiters_job_steps_are_whole():
 
 
 def test_the_waiters_job_is_this_whole_mapping():
-    """Mutations: `if: ${{ always() }}` -- red; drop the `admitted` clause -- red;
-    `permissions: { pull-requests: write }` -- red; drop `timeout-minutes` -- red; drop
+    """Mutations: `if: ${{ always() }}` -- red; add `&& needs.review.outputs.admitted == 'true'`
+    -- red; `permissions: { pull-requests: write }` -- red; drop `timeout-minutes` -- red; drop
     `continue-on-error` -- red."""
     job = workflow_jobs("apply-run.yml")["waiters"]
     assert {k: v for k, v in job.items() if k != "steps"} == WAITERS_JOB

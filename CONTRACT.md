@@ -2057,7 +2057,8 @@ reach two groups. Every dispatch that passes `run`'s condition takes a place in
 the group, whether or not it will own its comment: a second run of a comment,
 or a `[bot]` dispatch the claim refuses, waits its turn, then holds the group
 while `detect` runs, read-only, and ends having applied and written nothing on
-the pull request. No bound on that hold is claimed: it covers `detect`'s runner
+the pull request. Its `detect` still refuses as any run's does, so such a run can
+end red, for example when "Re-run all jobs" re-runs it after the pull request merged. No bound on that hold is claimed: it covers `detect`'s runner
 pickup, checkout, setup and wait for plan runs, and a lost `detect` runner holds
 it until GitHub ends the job. A run cancelled while it waits never reached its
 claim, so it gets no reply (§Outcome reply). The per-cell
