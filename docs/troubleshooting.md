@@ -3168,8 +3168,9 @@ it waits behind. That run may itself wait on an `<env>-apply` environment's
 approval: approve or reject it there, or cancel it from its run page, to let
 this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 A run that will not own its command, such as a second run of the same comment,
-can get this reply before it reads the claim taken; it then ends having done
-nothing.
+can get this reply before it reads the claim taken; it then applies nothing and
+writes nothing more on the pull request, and ends red when its `detect` refuses,
+for example after a "Re-run all jobs" once the pull request merged.
 
 ### `waits for the apply run of this pull request to finish`
 
@@ -3180,7 +3181,8 @@ it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
 cancelled from that run's page. A waiting run that will not own its command
-gets this reply too, and ends having done nothing once it starts.
+gets this reply too; once it starts it applies nothing, and it ends red when its
+`detect` refuses.
 
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 
