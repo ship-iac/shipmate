@@ -2021,7 +2021,8 @@ def test_the_deadline_refusal_names_the_lowest_live_run(monkeypatch, tmp_path):
 
 
 def test_an_incomplete_listing_polls_again(monkeypatch, tmp_path):
-    """Mutation: refuse on the first incomplete listing."""
+    """Mutations: sleep `PLAN_POLL` after every unsettled poll (`[30]`); settle on an
+    incomplete, empty listing (no sleep)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], "failed"), ([], True)])
     ad.main()
     assert _applied_cells(out) == ["stacks/app"]
@@ -2078,7 +2079,8 @@ def test_an_incomplete_listing_with_an_unread_run_polls_at_the_long_interval(mon
 def test_only_incomplete_empty_listings_spend_the_short_relists(monkeypatch, tmp_path):
     """Polls: incomplete-empty, run 9 live, incomplete-empty x4, 9 unread, incomplete-empty x2,
     complete. Mutations: count every unsettled poll against the bound (`[3, 30, 3, 3, 3, 30,
-    ...]`); reset the count after a live poll (a 3 after the unread poll)."""
+    ...]`); reset the count after a live poll (a 3 after the unread poll). The final 5 is
+    `PLAN_SETTLE`: run 9 was waited for."""
     polls = [([], "short"), ([_LIVE_9], "short")] + [([], "short")] * 7 + [([], True)]
     reads = {9: ["completed"] * 4 + [GH_FAILED, "completed"]}
     waited, clock = _wait(monkeypatch, tmp_path, polls, reads)

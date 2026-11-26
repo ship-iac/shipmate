@@ -97,9 +97,9 @@ _sleep = time.sleep
 #: p90 141 s; longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
 PLAN_WAIT = 480
 PLAN_POLL = 30
-#: Seconds before re-listing after an incomplete listing that found no run, at most `PLAN_RELISTS`
-#: times per wait. Probed: an apply run's own status change makes a counted listing advertise a
-#: run it does not return, for one read.
+#: Probed: an apply run's status change makes a counted listing advertise a run it does not
+#: return for one read, and the read 3 s later was consistent, so `PLAN_RELIST` re-lists past it;
+#: `PLAN_RELISTS` bounds the extra listings per wait.
 PLAN_RELIST = 3
 PLAN_RELISTS = 5
 #: Seconds a wait that waited on a run sleeps before the checks are read: a check-run listing can
