@@ -320,8 +320,8 @@ def test_a_newer_run_that_holds_nothing_is_not_named(gh):
 
 def test_an_auto_run_posts_only_its_cancel_sentences(gh, monkeypatch):
     """Holder 45 and untrusted run 30 are not named, no waits marker is posted, and this run's
-    own jobs are not read. Mutations: drop the `SHIPMATE_AUTO` branch of `reply` -- red (the
-    whole reply under the marker); drop `auto or` from `_while_waiting` -- red (own jobs read)."""
+    own jobs are not read. Mutation: drop `auto or` from `_while_waiting` -- red (own jobs
+    read)."""
     gh.runs, gh.jobs, _ = _behind([])
     gh.runs.append(_r(30, by_app=False))
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
@@ -332,13 +332,21 @@ def test_an_auto_run_posts_only_its_cancel_sentences(gh, monkeypatch):
 
 
 def test_an_auto_run_that_cancelled_nothing_posts_nothing(gh, monkeypatch):
-    """Mutation: keep every sentence when nothing was cancelled (`if cancelled else said`) --
-    red (holder 45 named)."""
+    """`_while_waiting` and `reply`'s `SHIPMATE_AUTO` branch each drop holder 45, so no single
+    mutation reddens this test; the next test pins that branch."""
     gh.runs = [_r(45, ref=_HEAD)]
     gh.jobs = {45: ([_rv("in_progress")], True)}
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
     gh.go()
     assert gh.posts == []
+
+
+def test_an_auto_run_with_an_incomplete_runs_listing_posts_nothing(gh, monkeypatch):
+    """Mutation: drop the `SHIPMATE_AUTO` branch of `reply` -- red (the may-wait reply posted)."""
+    gh.runs, gh.complete = [_r(40)], False
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
+    gh.go()
+    assert (gh.cancels, gh.posts) == ([], [])
 
 
 def test_a_run_whose_own_call_ended_names_no_untrusted_run(gh):
