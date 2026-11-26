@@ -109,6 +109,7 @@ jobs:
       envlevel1_empty: ${{ steps.d.outputs.envlevel1_empty }}
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
+      first_level: ${{ steps.d.outputs.first_level }}
       head_sha: ${{ steps.d.outputs.head_sha }}
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
@@ -172,19 +173,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Holds every cell the waves apply before the first one starts. A cell another pull request
-  # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or
-  # "Re-run all jobs" recomputes; "Re-run failed jobs" does not re-run `detect`.
+  # Locks every cell the waves apply, then runs the first populated level's pre-flight, snapshot
+  # and wave0 release. A cell another pull request took after `detect` read the locks refuses the
+  # run; a new `shipmate apply` or "Re-run all jobs" recomputes, "Re-run failed jobs" does not.
   lock:
     needs: [review, detect]
     if: ${{ !failure() && !cancelled() }}
-    # Its API calls grow with the cell count; an `ubuntu-slim` job stops at 15 minutes.
+    # Its API calls, the locks, the check listing and the flips, grow with the cell count; an
+    # `ubuntu-slim` job stops at 15 minutes.
     runs-on: ${{ inputs.runs_on }}
     environment: { name: shipmate-engine, deployment: false }
-    permissions: {}
+    # checks:read lists the apply checks; on a private repository, listing environments 403s
+    # without actions:read.
+    permissions: { actions: read, checks: read }
+    # A refusal recorded before the release keeps `unflip` off a run that flipped nothing.
     outputs:
-      refusal: ${{ steps.match.outputs.refusal || steps.l.outputs.refusal }}
+      refusal: ${{ steps.match.outputs.refusal || steps.l.outputs.refusal || steps.verify.outputs.refusal || steps.snap.outputs.refusal }}
       refused_by_rule: ${{ steps.l.outputs.refused_by_rule }}
+      by_wave: ${{ steps.snap.outputs.by_wave }}
     steps:
       # Before `lock-acquire`, so a decision that changed between the two reads locks nothing. The
       # right side is quoted: a literal, case-sensitive compare.
@@ -211,6 +217,28 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # Before the release, while a missing or unprotected environment can still refuse the run.
+      - id: verify
+        if: ${{ needs.detect.outputs.first_level != '' }}
+        uses: $/actions/verify-environments
+        with:
+          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+      - id: snap
+        if: ${{ needs.detect.outputs.first_level != '' }}
+        uses: $/actions/apply-snapshot
+        with:
+          head-sha: ${{ needs.detect.outputs.head_sha }}
+          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      - if: ${{ needs.detect.outputs.first_level != '' }}
+        uses: $/actions/apply-release
+        with:
+          snapshot: ${{ toJSON(fromJSON(steps.snap.outputs.by_wave).wave0) }}
+          deploy: false
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   envlevel0:
     # `apply-gate.cell_part` matches a cell job as `L<n> / <env> / <stack> / apply` or `/ save`, so
@@ -232,6 +260,7 @@ jobs:
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
       base_sha: ${{ needs.detect.outputs.base_sha }}
+      by_wave: ${{ needs.detect.outputs.first_level == '0' && needs.lock.outputs.by_wave || '' }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -258,6 +287,7 @@ jobs:
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
       base_sha: ${{ needs.detect.outputs.base_sha }}
+      by_wave: ${{ needs.detect.outputs.first_level == '1' && needs.lock.outputs.by_wave || '' }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -275,6 +305,7 @@ jobs:
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
       base_sha: ${{ needs.detect.outputs.base_sha }}
+      by_wave: ${{ needs.detect.outputs.first_level == '2' && needs.lock.outputs.by_wave || '' }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -292,10 +323,42 @@ jobs:
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
       base_sha: ${{ needs.detect.outputs.base_sha }}
+      by_wave: ${{ needs.detect.outputs.first_level == '3' && needs.lock.outputs.by_wave || '' }}
     secrets: *envlevel-secrets
 
-  summary:
+  # `lock` released the first level's wave0, or its runner was lost, and that level's call never
+  # started, so no `complete` of it runs: this returns those checks to `queued`. Every refusal
+  # `lock` records before the release keeps it off.
+  unflip:
     needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
+    if: ${{ always() && needs.detect.outputs.first_level != '' && (needs.detect.outputs.first_level == '0' && needs.envlevel0.result || needs.detect.outputs.first_level == '1' && needs.envlevel1.result || needs.detect.outputs.first_level == '2' && needs.envlevel2.result || needs.detect.outputs.first_level == '3' && needs.envlevel3.result || '') == 'skipped' && needs.lock.result != 'skipped' && needs.lock.outputs.refusal == '' }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: { actions: read, checks: read }
+    steps:
+      # A lost `lock` runner discards its outputs. The counted listing fails short rather than
+      # leave an unlisted check `in_progress`.
+      - id: resnap
+        if: ${{ needs.lock.outputs.by_wave == '' }}
+        uses: $/actions/apply-snapshot
+        with:
+          head-sha: ${{ needs.detect.outputs.head_sha }}
+          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          counted: "true"
+      - uses: $/actions/apply-complete
+        with:
+          by-wave: ${{ needs.lock.outputs.by_wave || steps.resnap.outputs.by_wave }}
+          wave-results: '{"wave0": "skipped"}'
+          job-id: ${{ job.check_run_id }}
+          deploy: false
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  summary:
+    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3, unflip]
     # A `pr_number` review reads as missing or not open, or an `auto` run refused at review,
     # gets a red run, no App comment and no gate write. Keyed on `review`:
     # a `detect` failure after a bound review still gets both, as a failed or cancelled apply does.

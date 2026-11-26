@@ -51,7 +51,7 @@ EXPECTED_STRATEGIES = {
 #: Each env-level call's whole `with:` in the two callers.
 #: The pre-merge apply passes its pull request, whose cell locks each cell verifies; the merge
 #: deploy passes the merged pull request with `deploy: true`, and each cell refuses only a lock
-#: another pull request holds.
+#: another pull request holds. Only the apply's first populated level takes `lock`'s snapshot.
 EXPECTED_ENVLEVEL_WITH = {
     (workflow, f"envlevel{n}"): {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
@@ -59,6 +59,16 @@ EXPECTED_ENVLEVEL_WITH = {
         "runs_on": "${{ inputs.runs_on }}",
         "tools": "${{ needs.detect.outputs.tools }}",
         **extra,
+        **(
+            {
+                "by_wave": (
+                    f"${{{{ needs.detect.outputs.first_level == '{n}' && "
+                    "needs.lock.outputs.by_wave || '' }}"
+                )
+            }
+            if workflow == "apply-run.yml"
+            else {}
+        ),
     }
     for workflow, extra in (
         (
@@ -138,7 +148,8 @@ def test_no_env_level_call_passes_a_cap():
     """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
     or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply-run.yml`'s
     `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call; pass `by_wave: x` in
-    `deploy.yml`'s `envlevel0` call."""
+    `deploy.yml`'s `envlevel0` call; compare `'0'` in `apply-run.yml`'s `envlevel1` `by_wave`, so
+    a level that is not the first skips its own snapshot."""
     found = {
         (workflow, job_id): job["with"]
         for workflow in ("apply-run.yml", "deploy.yml")

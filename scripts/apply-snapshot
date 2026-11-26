@@ -10,8 +10,9 @@ and only those whose record names the wave row's plan run and plan-text digest, 
 plan run of the same pull request: a check a newer plan, or a plan that found the cell behind
 the base, published after detect is not this run's to complete, while an older plan's
 unfinished duplicate is superseded by this apply.
-The `snapshot` job holds the App key and checks out no repository content, so no branch content
-runs beside the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
+The jobs that run it (`apply-env-level.yml`'s `snapshot`, `apply-run.yml`'s `lock` and
+`unflip`) hold the App key and check out no repository content, so no branch content runs beside
+the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
 right before that wave and completed right after it.
 """
 
@@ -110,4 +111,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main, usage="apply-snapshot")
+    run_annotated(main, refusal_output=True, usage="apply-snapshot")

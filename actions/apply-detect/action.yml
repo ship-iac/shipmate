@@ -40,6 +40,7 @@ outputs:
   envlevel1_empty: { description: "'true' when env-level 1 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel1_empty }}" }
   envlevel2_empty: { description: "'true' when env-level 2 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel2_empty }}" }
   envlevel3_empty: { description: "'true' when env-level 3 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel3_empty }}" }
+  first_level: { description: "The lowest env-level with a cell in any wave, '0' to '3'; empty when no level has one.", value: "${{ steps.d.outputs.first_level }}" }
   head_sha: { description: "The echoed head SHA.", value: "${{ steps.d.outputs.head_sha }}" }
   provenance_run: { description: "Auto form only: the autoplan run every applied cell's record names; empty when no cell applies.", value: "${{ steps.d.outputs.provenance_run }}" }
   base_sha: { description: "The tip of the pull request's base branch, read from its ref (in the auto form after the mergeability wait), that the behind cells were computed on; empty when no cell was selected to apply.", value: "${{ steps.d.outputs.base_sha }}" }

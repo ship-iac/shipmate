@@ -190,8 +190,9 @@ _SNAPSHOT_SNAP = {
         'if [ "$COUNTED" = true ]; then flag=(--counted); fi\n'
         'if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \\\n'
         '  \'.check_runs[]\' "${flag[@]}" > "$RUNNER_TEMP/checks.jsonl"; then\n'
-        '  echo "::error::could not list the check runs on $HEAD_SHA; the step log names the'
-        ' cause"\n'
+        '  msg="could not list the check runs on $HEAD_SHA; the step log names the cause"\n'
+        '  echo "refusal=$msg" >> "$GITHUB_OUTPUT"\n'
+        '  echo "::error::$msg"\n'
         "  exit 1\n"
         "fi\n"
         f'{_SNAP} < "$RUNNER_TEMP/checks.jsonl"\n'
@@ -212,6 +213,7 @@ def test_snapshot_action_steps_are_the_key_check_the_snapshot_then_the_mint():
     assert doc["runs"]["steps"] == [_call(_ACTION_WITH), _SNAPSHOT_SNAP, _SNAPSHOT_MINT]
     assert {k: v["value"] for k, v in doc["outputs"].items()} == {
         "by_wave": "${{ steps.snap.outputs.by_wave }}",
+        "refusal": "${{ steps.snap.outputs.refusal }}",
     }
 
 

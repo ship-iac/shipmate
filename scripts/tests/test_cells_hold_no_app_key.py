@@ -177,6 +177,7 @@ ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "complete"),
     ("apply-run.yml", "review"),
     ("apply-run.yml", "lock"),
+    ("apply-run.yml", "unflip"),
     ("apply-run.yml", "summary"),
     ("apply.yml", "admit"),
     ("apply.yml", "outcome"),

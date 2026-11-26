@@ -1169,9 +1169,16 @@ def bare_main(auto=False):
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         **auto_outputs,
     )
+
+
+def first_level(per_level):
+    """The lowest env-level of `per_level` with a cell in any wave, as `'0'`..`'3'`; `''` when
+    none has one. `apply-run.yml`'s `lock` snapshots and releases that level's wave0."""
+    return next((str(n) for n, waves in enumerate(per_level) if any(waves.values())), "")
 
 
 def main():
@@ -1252,6 +1259,7 @@ def main():
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         base_sha=base_sha,
     )

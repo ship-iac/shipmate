@@ -77,7 +77,10 @@ BLOCKS = {
     "apply-complete": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "apply-release": "if __name__ == '__main__':\n    run_annotated(main, usage='apply-release')",
     "apply-run-check": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
-    "apply-snapshot": "if __name__ == '__main__':\n    run_annotated(main, usage='apply-snapshot')",
+    "apply-snapshot": (
+        "if __name__ == '__main__':\n"
+        "    run_annotated(main, refusal_output=True, usage='apply-snapshot')"
+    ),
     "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "claim": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "cell-lock": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
@@ -100,6 +103,9 @@ BLOCKS = {
     "rerun-autoplan": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "tofu-error": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "tool-versions": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "verify-environments": (
+        "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)"
+    ),
 }
 #: Run by an operator in a terminal, never by a workflow: `onboard` strips `::error::` for human
 #: output itself, and neither `register-app` nor `repin` raises one.
@@ -166,13 +172,15 @@ def test_every_script_prints_its_refusal_through_run_annotated(script):
         ("reply-comment", "--post", "", "::error::usage: reply-comment"),
     ],
 )
-def test_a_command_line_argument_refuses_before_main(script, argument, stdin, message):
+def test_a_command_line_argument_refuses_before_main(tmp_path, script, argument, stdin, message):
     """The env carries no `PATH`, `GH_TOKEN` or `GITHUB_REPOSITORY`, so a script that reads its
     environment, stdin or the API before refusing dies on a missing variable with another stderr,
-    and none can reach a live repository. Mutations: drop `usage=` from `dispatch-body`'s
-    `__main__` -- `main` runs and fails on its environment; move the check after `main(*args)`
-    in `run_annotated` -- every `main` runs first."""
+    and none can reach a live repository. It carries `GITHUB_OUTPUT`, which a runner always sets,
+    for a script that writes its refusal as an output. Mutations: drop `usage=` from
+    `dispatch-body`'s `__main__` -- `main` runs and fails on its environment; move the check
+    after `main(*args)` in `run_annotated` -- every `main` runs first."""
     env = {k: os.environ[k] for k in ("SYSTEMROOT",) if k in os.environ}
+    env["GITHUB_OUTPUT"] = str(tmp_path / "github_output")
     proc = subprocess.run(
         [sys.executable, str(ENGINE / "scripts" / script), argument],
         input=stdin,

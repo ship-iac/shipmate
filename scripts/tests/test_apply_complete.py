@@ -385,6 +385,46 @@ def test_a_cancelled_wave_keeps_its_listed_cells_rows():
     assert rows == [row(APP, [2, 3], stopped[0])]
 
 
+#: The first level's snapshot `lock` wrote: two wave0 checks and one wave1 check.
+UNFLIP_BY_WAVE = {"wave0": {DNS: [1], APP: [2, 3]}, "wave1": {WEB: [4]}}
+NOT_RUN = {"body": {"status": "queued"}, "title": "Not run"}
+
+
+def _unflip(jobs, attempt=1):
+    """The writes `apply-run.yml`'s `unflip` (check run id 950, under no level) decides."""
+    own = job("apply / run / unflip", None, jid=950, attempt=attempt)
+    rows, unresolved = apply_complete.classify(
+        UNFLIP_BY_WAVE, {"wave0": "skipped"}, [own, *jobs], "950"
+    )
+    return [w for r in rows for w in apply_complete.writes(r, "acme/demo")], unresolved
+
+
+def test_unflip_returns_the_first_levels_wave0_checks_not_run():
+    """`unflip` names no level and lists no cell row: each wave0 check returns to `queued`
+    titled `Not run`, and wave1's is not written. Mutation: `not_run` ignores a `skipped`
+    result -> both cells unresolved, nothing written."""
+    assert _unflip([]) == (
+        [{"id": 2, **NOT_RUN}, {"id": 3, **NOT_RUN}, {"id": 1, **NOT_RUN}],
+        [],
+    )
+
+
+def test_unflip_holds_a_cell_an_earlier_attempt_applied_and_did_not_save(run_env):
+    """The hold reads the cell's rows at any level and attempt. Mutations: drop the `ag.unsaved`
+    branch of `_decide` -> APP written `Not run`; `not_run` ignores a `skipped` result -> DNS
+    unresolved and unwritten."""
+    earlier = cell("apply / run / L0 / dev-eu / stacks/app", "success", "failure")
+    held_body = {"status": "in_progress", "details_url": HELD_URL}
+    assert _unflip(earlier, attempt=2) == (
+        [
+            {"id": 2, "body": held_body, "title": "State not saved", "held": True},
+            {"id": 3, "body": held_body, "title": "State not saved", "held": True},
+            {"id": 1, **NOT_RUN},
+        ],
+        [],
+    )
+
+
 def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
     r = {"check": APP, "ids": list(ids), "conclusion": conclusion, "job_id": job_id, "url": url}
     return apply_complete.writes(r, repo)

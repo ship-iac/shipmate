@@ -97,6 +97,7 @@ _APPLY_DETECT_OUTPUTS = {
     "envlevel1_empty": "${{ steps.d.outputs.envlevel1_empty }}",
     "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
     "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
+    "first_level": "${{ steps.d.outputs.first_level }}",
     "head_sha": "${{ steps.d.outputs.head_sha }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
@@ -241,7 +242,7 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     refuses; read `refused_by_rule` as `steps.setup.outputs.refused_by_rule ||
     steps.d.outputs.refused_by_rule`, so a setup failure could read as a rule refusal; drop
     `steps.pr.outputs.refusal ||` from `refusal`; delete `decision`, so `lock` refuses every
-    run."""
+    run; delete `first_level`, so `lock` snapshots no level and every level snapshots its own."""
     assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -296,6 +297,12 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         }
         for n in (0, 1, 2, 3)
     },
+    "first_level": {
+        "description": (
+            "The lowest env-level with a cell in any wave, '0' to '3'; empty when no level has one."
+        ),
+        "value": "${{ steps.d.outputs.first_level }}",
+    },
     "head_sha": {
         "description": "The echoed head SHA.",
         "value": "${{ steps.d.outputs.head_sha }}",
@@ -340,7 +347,7 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: add a `report` output to `actions/apply-detect/action.yml`; restore its
     `pusher` output; delete its `refusal` output; delete its `provenance_run` output; delete its
     `base_sha` output; restore `held_cells` in `base_sha`'s description; delete its
-    `refused_by_rule` output."""
+    `refused_by_rule` output; delete its `first_level` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
 
 

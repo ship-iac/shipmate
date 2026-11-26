@@ -15,7 +15,8 @@ label fails here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.run
 `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to `${{ inputs.runs_on }}`; the
 `cell.yml` `save` job to `ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml`
 `unlock` to `ubuntu-latest`; `apply-run.yml` `lock` to `ubuntu-slim`; `release.yml` `release`
-to `ubuntu-slim`; `deploy.yml` `warm` to `ubuntu-slim`; `deploy.yml` `replan` to `ubuntu-slim`.
+to `ubuntu-slim`; `deploy.yml` `warm` to `ubuntu-slim`; `deploy.yml` `replan` to `ubuntu-slim`;
+`apply-run.yml` `unflip` to `${{ inputs.runs_on }}`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -36,6 +37,7 @@ EXPECTED = {
     ("apply-run.yml", "review"): SLIM,
     ("apply-run.yml", "detect"): INPUT,
     ("apply-run.yml", "lock"): INPUT,
+    ("apply-run.yml", "unflip"): SLIM,
     ("apply-run.yml", "summary"): SLIM,
     ("apply.yml", "outcome"): SLIM,
     ("ci.yml", "lint-test"): LATEST,

@@ -888,3 +888,17 @@ def test_a_call_whose_detect_is_pending_after_review_ended_holds_the_group():
     Mutation: `_in_group_wait` reads any in-call job `pending` -- red."""
     jobs = [_rv("completed"), _job("detect", "pending")]
     assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)
+
+
+def test_a_call_whose_unflip_runs_after_every_level_ended_holds_the_group():
+    """`unflip` writes apply checks, so its run is no idle one.
+
+    Mutation: `_unfinished` skips jobs whose name ends `/ unflip` -- red."""
+    jobs = [
+        _rv("completed"),
+        _job("detect", "completed"),
+        _job("lock", "completed"),
+        _job("L0 / dev / app / apply", "completed"),
+        _job("unflip", "in_progress"),
+    ]
+    assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)

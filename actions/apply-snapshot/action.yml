@@ -21,6 +21,9 @@ outputs:
   by_wave:
     description: JSON object mapping each wave key of `waves-json` to the pre-existing apply-check ids of that wave's cells; `{}` for an empty wave.
     value: ${{ steps.snap.outputs.by_wave }}
+  refusal:
+    description: The first error of the `::error::` message that failed the step, without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
+    value: ${{ steps.snap.outputs.refusal }}
 runs:
   using: composite
   steps:
@@ -43,7 +46,9 @@ runs:
         if [ "$COUNTED" = true ]; then flag=(--counted); fi
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
           '.check_runs[]' "${flag[@]}" > "$RUNNER_TEMP/checks.jsonl"; then
-          echo "::error::could not list the check runs on $HEAD_SHA; the step log names the cause"
+          msg="could not list the check runs on $HEAD_SHA; the step log names the cause"
+          echo "refusal=$msg" >> "$GITHUB_OUTPUT"
+          echo "::error::$msg"
           exit 1
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl"

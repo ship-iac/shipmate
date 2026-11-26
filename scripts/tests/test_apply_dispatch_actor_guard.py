@@ -186,6 +186,15 @@ DOWNSTREAM_NEEDS = {
         "envlevel1": ["review", "detect", "lock", "envlevel0"],
         "envlevel2": ["review", "detect", "lock", "envlevel0", "envlevel1"],
         "envlevel3": ["review", "detect", "lock", "envlevel0", "envlevel1", "envlevel2"],
+        "unflip": [
+            "review",
+            "detect",
+            "lock",
+            "envlevel0",
+            "envlevel1",
+            "envlevel2",
+            "envlevel3",
+        ],
         "summary": [
             "review",
             "detect",
@@ -194,6 +203,7 @@ DOWNSTREAM_NEEDS = {
             "envlevel1",
             "envlevel2",
             "envlevel3",
+            "unflip",
         ],
     },
     # No `summary` job: an unlock refreshes no gate and `result` replies with the job token, so
@@ -344,7 +354,8 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     every level before it, so a bare apply runs them in `needs` order.
 
     Mutations: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red; drop
-    `review` from `lock`'s -- red."""
+    `review` from `lock`'s -- red; drop `unflip` from `summary`'s, so its gate refresh can read
+    before `unflip` wrote -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map
