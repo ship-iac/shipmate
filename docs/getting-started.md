@@ -494,7 +494,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except thirty-three that run neither `terramate` nor `tofu` and stay on
+engine job except twenty-six that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross

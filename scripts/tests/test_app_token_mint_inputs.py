@@ -215,6 +215,7 @@ _MINT_INPUTS = {
     ("actions/base-push-plan/action.yml", "token"): _composite(
         actions="write", pull_requests="read", checks="read"
     ),
+    ("actions/cell-complete/action.yml", "token"): _composite(checks="write", pull_requests="read"),
     ("actions/claim/action.yml", "token"): _composite(pull_requests="write", actions="read"),
     ("actions/comment-ops/action.yml", "doctortoken"): _composite(
         checks="read", contents="read", pull_requests="write", actions="read", environments="read"

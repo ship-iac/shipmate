@@ -534,7 +534,7 @@ off the pull request's checks list.
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `queue` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
-  `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete`,
+  `wave0-release` … `wave7-release` and `complete`, `cell.yml`'s `save`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -547,6 +547,14 @@ off the pull request's checks list.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
+  The App key must be a `shipmate-engine` environment secret: every wave
+  passes `cell.yml` the empty literal, so `save` reads the key from its own
+  `shipmate-engine` binding alone, and a key stored only as a repository or
+  organization secret fails the `save` of every cell whose `apply` succeeded,
+  at `Verify the App key arrived`, which fails its wave.
+  A `SHIPMATE_APP_PRIVATE_KEY` on a cell's apply environment fails that cell's
+  `apply` at its first step, before any pull-request code runs:
+  ``the environment <binding> holds SHIPMATE_APP_PRIVATE_KEY, which reaches pull-request code in this apply job; delete it there: it belongs on shipmate-engine alone``.
 - For every name in the row's `tf_vars` — the layout's derived names plus the
   environment's own `vars` — the value `tofu` receives is the table's. A
   consuming repository's `terramate.config.run.env` may read any name, and may
@@ -3827,14 +3835,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-three, which run on
+  every engine job but twenty-six, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
   `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and
+  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-three
+  for a runner. An account that cannot use `ubuntu-slim` leaves the twenty-six
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the

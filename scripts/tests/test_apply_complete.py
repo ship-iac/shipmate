@@ -779,14 +779,16 @@ def test_plan_mode_writes_a_hold_over_an_earlier_failure(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "argv", [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"], ["stranded"]]
+    "argv",
+    [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"], ["stranded"], ["own", "[1]"]],
 )
 def test_a_wrong_argument_list_refuses(argv):
-    """Mutation: drop the length check -> `plan` with no files raises IndexError."""
+    """Mutation: drop the argument-count check -> `plan` with no files raises TypeError."""
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
     assert str(exc.value) == (
-        "::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]"
+        "::error::usage: apply-complete "
+        "[list | plan <rows> | stranded <reasons> | own <ids> <job id>]"
     )
 
 

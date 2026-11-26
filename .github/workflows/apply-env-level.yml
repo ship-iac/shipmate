@@ -188,7 +188,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
     name: &wave-name ${{ matrix.environment }} / ${{ matrix.stack }}
-    with: &cell-with
+    with:
       cell: ${{ toJSON(matrix) }}
       environment: ${{ matrix.environment }}
       stack: ${{ matrix.stack }}
@@ -200,13 +200,15 @@ jobs:
       provenance_run: ${{ inputs.provenance_run }}
       base_sha: ${{ inputs.base_sha }}
       deploy: ${{ inputs.deploy }}
-    # Named, never `inherit`: see the envlevel0 job in apply-run.yml. No App key: the cell holds
-    # none.
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave0[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
+    # Named, never `inherit`: see the envlevel0 job in apply-run.yml. The App key is the empty
+    # literal, so `apply` holds none and `save` reads its environment's.
     secrets: &cell-secrets
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+      SHIPMATE_APP_PRIVATE_KEY: ""
   wave1:
-    needs: [wave0, wave1-release]
+    needs: [snapshot, wave0, wave1-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' && needs.wave1-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -215,10 +217,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave1[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave2:
-    needs: [wave0, wave1, wave2-release]
+    needs: [snapshot, wave0, wave1, wave2-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && needs.wave2-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -227,10 +241,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave2[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave3:
-    needs: [wave0, wave1, wave2, wave3-release]
+    needs: [snapshot, wave0, wave1, wave2, wave3-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' && needs.wave3-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -239,10 +265,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave3[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave4:
-    needs: [wave0, wave1, wave2, wave3, wave4-release]
+    needs: [snapshot, wave0, wave1, wave2, wave3, wave4-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' && needs.wave4-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -251,10 +289,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave4[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave5:
-    needs: [wave0, wave1, wave2, wave3, wave4, wave5-release]
+    needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' && needs.wave5-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -263,10 +313,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave5[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave6:
-    needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6-release]
+    needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' && needs.wave6-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -275,10 +337,22 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave6[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
   wave7:
-    needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7-release]
+    needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' && needs.wave7-release.result == 'success' }}
     uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
@@ -287,27 +361,33 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
     name: *wave-name
-    with: *cell-with
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      check_ids: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave).wave7[format('apply / {0} / {1}', matrix.environment, matrix.stack)]) }}
     secrets: *cell-secrets
 
-  # Writes one wave's checks when it ends: success completes, any other outcome returns to queued
-  # with a title. `continue-on-error`: a cell missing from the listing fails this job after ~2
-  # minutes of retries, and `complete` lists the level again.
-  wave0-complete:
-    needs: [snapshot, wave0]
-    # The next-wave clause skips the last populated wave: waves are compacted from wave0, so its
-    # successor is empty, and `complete` writes its checks right after it.
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
+  # Rewrites every check of a level whose release or wave failed or was cancelled, or whose run
+  # was cancelled; a level that succeeded skips it, since each `save` completed its own cell. It
+  # needs every release and wave, so no flip lands after it.
+  complete:
+    needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7]
+    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (cancelled() || contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) }}
     runs-on: ubuntu-slim
-    # Never fails the level: `complete` writes every snapshot check after all waves, so
-    # failing here would skip successor env-levels over a check `complete` then writes.
-    continue-on-error: true
-    permissions: &complete-permissions { actions: read, checks: read }
-    environment: &complete-environment { name: shipmate-engine, deployment: false }
+    permissions: { actions: read, checks: read }
+    environment: { name: shipmate-engine, deployment: false }
     env:
-      WAVE_RESULTS: '{"wave0": "${{ needs.wave0.result }}"}'
-    # Per-job values stay in each job's `env`, `needs` and `if:`, never in this shared list.
-    steps: &complete-steps
+      WAVE_RESULTS: '{"wave0": "${{ needs.wave0.result }}", "wave1": "${{ needs.wave1.result }}", "wave2": "${{ needs.wave2.result }}", "wave3": "${{ needs.wave3.result }}", "wave4": "${{ needs.wave4.result }}", "wave5": "${{ needs.wave5.result }}", "wave6": "${{ needs.wave6.result }}", "wave7": "${{ needs.wave7.result }}"}'
+    steps:
       - uses: $/actions/apply-complete
         with:
           by-wave: ${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}
@@ -317,76 +397,3 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-  wave1-complete:
-    needs: [snapshot, wave1]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave1.result == 'success' || needs.wave1.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave1": "${{ needs.wave1.result }}"}'
-    steps: *complete-steps
-  wave2-complete:
-    needs: [snapshot, wave2]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave2.result == 'success' || needs.wave2.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave2": "${{ needs.wave2.result }}"}'
-    steps: *complete-steps
-  wave3-complete:
-    needs: [snapshot, wave3]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave3.result == 'success' || needs.wave3.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave3": "${{ needs.wave3.result }}"}'
-    steps: *complete-steps
-  wave4-complete:
-    needs: [snapshot, wave4]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave4.result == 'success' || needs.wave4.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave4": "${{ needs.wave4.result }}"}'
-    steps: *complete-steps
-  wave5-complete:
-    needs: [snapshot, wave5]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave5.result == 'success' || needs.wave5.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave5": "${{ needs.wave5.result }}"}'
-    steps: *complete-steps
-  wave6-complete:
-    needs: [snapshot, wave6]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && (needs.wave6.result == 'success' || needs.wave6.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave6": "${{ needs.wave6.result }}"}'
-    steps: *complete-steps
-
-  # Rewrites every check; the only writer on a cancelled run and of the last populated wave. It
-  # needs every release, wave and completion, so no flip lands after it and gate-refresh and
-  # apply-summary never read a check while a write is in flight.
-  complete:
-    needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete]
-    if: ${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') }}
-    runs-on: ubuntu-slim
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave0": "${{ needs.wave0.result }}", "wave1": "${{ needs.wave1.result }}", "wave2": "${{ needs.wave2.result }}", "wave3": "${{ needs.wave3.result }}", "wave4": "${{ needs.wave4.result }}", "wave5": "${{ needs.wave5.result }}", "wave6": "${{ needs.wave6.result }}", "wave7": "${{ needs.wave7.result }}"}'
-    steps: *complete-steps

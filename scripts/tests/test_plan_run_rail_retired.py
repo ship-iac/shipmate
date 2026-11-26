@@ -37,6 +37,7 @@ EXPECTED_INPUTS = {
             "auto",
             "base_sha",
             "cell",
+            "check_ids",
             "deploy",
             "environment",
             "head_sha",
