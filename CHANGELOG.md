@@ -20,6 +20,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **An apply run's `summary` posts the result comment, then refreshes `shipmate / gate`, so the comment posts one step sooner.** A failed comment still refreshes the gate. A cancel between the two leaves the gate as it was until the next refresh.
 - **Only `review` tells the apply runs waiting behind the run that holds the queue; `summary` no longer does, so an apply run's `summary` mints one App token fewer.** A run whose call joins the queue after the holder's `review` listed the runs is no longer told as the holder ends; the next holder's `review` tells it if it still waits (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 - **The DAG-shape notice reads `<n> dependency levels` instead of `<n> wave levels`.** The count is unchanged: the repository's full `after` graph, not the waves an apply runs.
 - **An apply that fails on a review decision the engine does not know names GitHub as the source.** It reads ``not authorized: could not determine the PR's review decision (got '<decision>'); GitHub returned a review decision this engine does not know; check the pinned engine version, then retry.`` (`docs/troubleshooting.md`).

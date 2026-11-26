@@ -2200,7 +2200,7 @@ A cancelled stale run writes, by where it waited:
   and the level's `complete` returns the wave's flipped checks to `queued` titled
   `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
   they stay pending. `summary` runs after a
-  successful `review`, refreshes the old head's gate and posts the apply comment,
+  successful `review`, posts the apply comment and refreshes the old head's gate,
   so `outcome` stays silent.
 
 These limits are accepted:
@@ -5866,7 +5866,7 @@ OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (admit, or guard on a refused dispatch →
 `apply-run.yml`, one run per pull request at a time: review beside detect → cell lock acquisition and the first level's pre-flight and wave0 release →
-env-levels 0..3 via `apply-env-level.yml` → unflip when the first level never started → gate refresh + result comment;
+env-levels 0..3 via `apply-env-level.yml` → unflip when the first level never started → result comment + gate refresh;
 then the outcome reply when no result comment posted; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one
 every pending `auto` environment in `needs` order), and the unlock path

@@ -81,7 +81,7 @@ REVIEW_STEP = {
     "with": _with("start"),
 }
 
-#: `summary`'s step, whole: after the apply comment, and run after a failed gate refresh.
+#: `summary`'s step, whole: last, and run after a failed gate refresh.
 SUMMARY_STEP = {
     "name": FINISH,
     "if": "${{ always() && steps.result.outputs.posted == 'true' }}",
@@ -131,11 +131,17 @@ def test_review_starts_the_check_after_rd():
 
 
 def test_summary_finishes_the_check_after_the_apply_comment():
-    """Mutations: drop `continue-on-error`; drop `always() && ` from the `if:`; drop the
-    `posted` clause; `head-sha: ${{ github.sha }}`; move the step before the apply comment --
+    """`finish` is last, after the apply comment and the gate refresh, in that order.
+    Mutations: drop `continue-on-error`; drop `always() && ` from the `if:`; drop the
+    `posted` clause; `head-sha: ${{ github.sha }}`; move the step before the gate step --
     each red."""
-    before, step = _site("apply-run.yml", "summary")
-    assert before["id"] == "result"
+    _, step = _site("apply-run.yml", "summary")
+    steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
+    assert [s.get("name") for s in steps[-3:]] == [
+        "Post apply result comment",
+        "Complete gate if every apply check is done",
+        FINISH,
+    ]
     assert step == SUMMARY_STEP
 
 
