@@ -99,7 +99,7 @@ PLAN_WAIT = 480
 PLAN_POLL = 30
 #: Probed on one apply run, 35 reads about 3 s apart (2026-11-26): its status changes made a counted
 #: listing advertise a run it did not return, each for one read, so `PLAN_RELIST` re-lists past
-#: it; `PLAN_RELISTS` bounds the extra listings per wait.
+#: it. `PLAN_RELISTS` is a chosen bound on the extra listings per wait, not a measured one.
 PLAN_RELIST = 3
 PLAN_RELISTS = 5
 #: Seconds a wait that waited on a run sleeps before the checks are read: a check-run listing can
