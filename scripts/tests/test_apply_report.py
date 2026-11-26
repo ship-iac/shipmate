@@ -283,17 +283,17 @@ def test_an_undetermined_review_decision_reads_failed_with_no_review_remedy(
     env = {
         "SHIPMATE_AUTO": auto,
         "SHIPMATE_DETECT_REFUSAL": (
-            "not authorized: could not determine the PR's review decision (got ''); the apply "
-            "run's `review` job passed `detect` no decision this engine knows; check the pinned "
-            "engine version, then retry."
+            "not authorized: could not determine the PR's review decision (got ''); GitHub "
+            "returned a review decision this engine does not know; check the pinned engine "
+            "version, then retry."
         ),
     }
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
     assert body == (
         f"### shipmate apply\n\n🔴 failed {_AT}\n\n{auto_line}"
-        "```\nnot authorized: could not determine the PR's review decision (got ''); the apply "
-        "run's `review` job passed `detect` no decision this engine knows; check the pinned "
-        "engine version, then retry.\n"
+        "```\nnot authorized: could not determine the PR's review decision (got ''); GitHub "
+        "returned a review decision this engine does not know; check the pinned engine "
+        "version, then retry.\n"
         "```\n\nComment `shipmate help` for the available commands."
     )
 

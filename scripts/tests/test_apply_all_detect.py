@@ -829,8 +829,8 @@ def test_main_fails_an_undetermined_decision_before_any_read(tmp_path, monkeypat
         )
     assert exc.value.code == (
         f"::error::not authorized: could not determine the PR's review decision (got '{got}'); "
-        "the apply run's `review` job passed `detect` no decision this engine knows; check the "
-        "pinned engine version, then retry."
+        "GitHub returned a review decision this engine does not know; check the pinned engine "
+        "version, then retry."
     )
     assert type(exc.value) is SystemExit
     assert urls == []
@@ -1762,9 +1762,9 @@ def test_an_undetermined_bare_apply_fails_without_listing_plan_runs(tmp_path, mo
             urls=urls,
         )
     assert str(exc_info.value) == (
-        "::error::not authorized: could not determine the PR's review decision (got ''); the "
-        "apply run's `review` job passed `detect` no decision this engine knows; check the "
-        "pinned engine version, then retry."
+        "::error::not authorized: could not determine the PR's review decision (got ''); GitHub "
+        "returned a review decision this engine does not know; check the pinned engine version, "
+        "then retry."
     )
     assert urls == []
     assert clock.sleeps == []

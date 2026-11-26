@@ -152,6 +152,36 @@ def _rd():
     return step
 
 
+#: The whole `outputs:` of `actions/apply-pr-read`, hand-written. Each call site reads them by
+#: name; one the action stops mapping reads '' there.
+_PR_READ_OUTPUTS = {
+    "decision": {
+        "description": (
+            "The pull request's `reviewDecision`, `NONE` when it has none; empty when the step "
+            "refused."
+        ),
+        "value": "${{ steps.rd.outputs.decision }}",
+    },
+    "unbound": {
+        "description": "`true` when no open pull request matched; empty otherwise.",
+        "value": "${{ steps.rd.outputs.unbound }}",
+    },
+    "refusal": {
+        "description": (
+            "The refusal message without the `::error::` prefix, every CR and LF replaced by a "
+            "space; empty when the step did not refuse. Set although the step fails. Carries the "
+            "dispatcher-supplied `ref`, so a reader passes it through `env:`."
+        ),
+        "value": "${{ steps.rd.outputs.refusal }}",
+    },
+}
+
+
+def test_the_pr_read_action_declares_exactly_these_outputs():
+    """Mutation: read `unbound` from `steps.read.outputs.unbound`."""
+    assert action_yaml("apply-pr-read")["outputs"] == _PR_READ_OUTPUTS
+
+
 #: Each call site of the action, whole, by job: `review` reads with its App token, `detect` with
 #: its job token, both the dispatch's own pull request and ref.
 _READ_SITES = {
