@@ -26,19 +26,6 @@ WAITERS_STEP = {
     "with": _WITH,
 }
 
-#: The `waiters` job's steps, whole: the App-key check, then the waiters step.
-WAITERS_STEPS = [
-    {
-        "name": "Verify the App key arrived",
-        "uses": "$/actions/verify-app-key",
-        "with": {
-            "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-            "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-        },
-    },
-    WAITERS_STEP,
-]
-
 #: The `waiters` job minus its steps, whole: only after a bound review, no token of its own.
 WAITERS_JOB = {
     "needs": ["review"],
@@ -83,9 +70,10 @@ def test_the_action_runs_the_waiters_mode_with_both_actors():
 
 
 def test_the_waiters_job_steps_are_whole():
-    """Mutations: drop `continue-on-error` -- red; drop `timeout-minutes` -- red; delete the
-    key check -- red."""
-    assert _steps("waiters") == WAITERS_STEPS
+    """The action verifies the App key itself, inside this display-only step. Mutations: drop
+    `continue-on-error` -- red; drop `timeout-minutes` -- red; add a job-level key check before
+    it -- red."""
+    assert _steps("waiters") == [WAITERS_STEP]
 
 
 def test_the_waiters_job_is_this_whole_mapping():

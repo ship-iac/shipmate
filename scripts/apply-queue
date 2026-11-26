@@ -100,7 +100,9 @@ def idle(jobs):
     group, or every unfinished job of its call is a cell's `apply` `waiting` on an environment's
     approval, or that cell's `save` listing no steps. Any other unfinished job keeps the run: a
     `pending` cell or `summary` waits on its own concurrency group mid-run, a started `save`
-    writes the state, and a cancelled `summary` drops the apply comment and the gate refresh."""
+    writes the state, and a cancelled `summary` drops the apply comment and the gate refresh.
+    An unfinished `waiters` job keeps the run too: a stale run is not cancelled while its
+    `waiters` is pending, an accepted cost of a display-only job."""
     if _in_group_wait(jobs):
         return True
     unfinished = _unfinished(jobs)
@@ -119,7 +121,8 @@ def idle(jobs):
 
 def holds(jobs):
     """Whether the run holds `shipmate-apply-<pr_number>`: a job of its call is unfinished and
-    its call no longer waits for the group."""
+    its call no longer waits for the group. An unfinished `waiters` job, display only, counts: the
+    run holds the group until it ends."""
     return bool(_unfinished(jobs)) and not _in_group_wait(jobs)
 
 

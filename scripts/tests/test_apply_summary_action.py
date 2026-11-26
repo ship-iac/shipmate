@@ -477,6 +477,20 @@ def test_apply_passes_apply_summary_exactly_this_with():
     assert step["with"] == _APPLY_SUMMARY_WITH
 
 
+def test_the_comment_step_is_bounded_before_the_gate_refresh():
+    """`timeout-minutes` ends a hung comment as a failed step, inside `ubuntu-slim`'s 15-minute
+    job cap, so the `!cancelled()` gate refresh after it still runs; the `with:` is pinned
+    above. Mutations: drop `timeout-minutes` -- red; drop the `if:` -- red."""
+    step = _summary_job_step("Post apply result comment")
+    assert {k: v for k, v in step.items() if k != "with"} == {
+        "name": "Post apply result comment",
+        "id": "result",
+        "if": "${{ !cancelled() }}",
+        "timeout-minutes": 10,
+        "uses": "$/actions/apply-summary",
+    }
+
+
 #: The report download step, hand-written.
 _REPORT_DOWNLOAD = {
     "name": "Download the apply report",

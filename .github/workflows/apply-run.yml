@@ -92,12 +92,8 @@ jobs:
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      - name: Verify the App key arrived
-        uses: $/actions/verify-app-key
-        with:
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      # A failure or a hung API call here must not fail the run.
+      # The action verifies the App key itself. A failure or a hung API call here must not fail
+      # the run.
       - name: Tell the apply runs waiting behind this one
         uses: $/actions/apply-waiters
         continue-on-error: true
@@ -424,9 +420,11 @@ jobs:
       - name: Warn on apply cell summaries download failure
         if: ${{ !cancelled() && steps.download.outcome == 'failure' }}
         run: echo "::warning::apply cell summaries download did not complete; the comment may render without per-cell detail"
+      # The gate refresh follows, so a hung comment must end as a failed step, not a cancelled job.
       - name: Post apply result comment
         id: result
         if: ${{ !cancelled() }}
+        timeout-minutes: 10
         uses: $/actions/apply-summary
         with:
           pr-number: ${{ inputs.pr_number }}

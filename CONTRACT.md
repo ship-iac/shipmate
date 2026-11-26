@@ -2224,6 +2224,9 @@ These limits are accepted:
   seen; it is not told again when it then waits behind another run.
 - A waiting run can be told more than once, by the queue step and `waiters`,
   when the comments listing does not yet show an earlier reply.
+- An unfinished `waiters` job keeps its run holding the group, so the next run
+  starts only once it ends, and a stale run whose `waiters` job is pending is not
+  cancelled.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -2539,7 +2542,10 @@ check/status/comment/issue that crosses a workflow-run boundary:
     an apply `summary` refreshes it, which greens it once every apply check is
     done and otherwise leaves it as it is, and fails the run over a hold; a
     deploy `summary` writes its deploy verdict. Its waiting cells keep their
-    apply checks pending, so no refresh greens the gate until they apply;
+    apply checks pending, so no refresh greens the gate until they apply. An
+    apply `summary` cancelled after its result comment posted refreshes no gate:
+    the gate keeps its last write until the next refresh, and `outcome` posts no
+    reply, since the comment posted;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
     superseded deploy, unless a cell's apply check is titled `State not saved`
