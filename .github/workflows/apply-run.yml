@@ -45,8 +45,9 @@ concurrency:
   queue: max
 jobs:
   review:
-    # Deliberately unconditional -- no `if:`: reads the decision server-side for every form; for
-    # the comment forms it closes the comment-to-dispatch TOCTOU (CONTRACT.md §Comment-ops). A
+    # Deliberately unconditional -- no `if:`: reads the decision server-side for every form
+    # `apply.yml` admits to the call; for the comment forms it closes the comment-to-dispatch
+    # TOCTOU (CONTRACT.md §Comment-ops). A
     # hand-made dispatch never reaches decide(), so this job and `detect` bind `ref` to the open
     # PR's head.
     runs-on: ubuntu-slim

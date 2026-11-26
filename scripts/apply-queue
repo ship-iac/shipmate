@@ -134,19 +134,24 @@ _OWN_RELISTS, _OWN_PAUSE = 3, 3
 
 
 def own_waits(repo, own):
-    """Whether this run's own call waits for `shipmate-apply-<pr_number>` (`_in_group_wait`): a
-    complete jobs listing of run `own` whose call's `review` is listed and not `pending` is no
-    wait. While the listing is incomplete or lists no `review`, re-lists up to `_OWN_RELISTS`
-    times, `_OWN_PAUSE` seconds apart; still undecided, it warns and counts as a wait."""
+    """Whether this run's own call waits for `shipmate-apply-<pr_number>`, read from the call's
+    `review` in a complete jobs listing of run `own`: `pending` waits, `in_progress` or
+    `completed` does not. Any other listing (incomplete, no `review`, or `review` in another
+    status such as `queued`) is undecided: re-lists up to `_OWN_RELISTS` times, `_OWN_PAUSE`
+    seconds apart; still undecided, it warns and counts as a wait."""
     for relist in range(_OWN_RELISTS + 1):
         if relist:
             time.sleep(_OWN_PAUSE)
         jobs, complete = run_jobs(repo, own)
-        if complete and any(_is_review(j) for j in jobs):
-            return _in_group_wait(jobs)
+        status = next((j["status"] for j in jobs if _is_review(j)), None) if complete else None
+        if status == "pending":
+            return True
+        if status in ("in_progress", "completed"):
+            return False
     print(
-        f"::warning::could not tell whether run {own} waits for the group: its jobs listing was "
-        "incomplete or listed no review; the reply names the run it may wait behind"
+        f"::warning::could not tell whether run {own} waits for the group: no complete jobs "
+        "listing showed its review pending, running or done; the reply names the run it may "
+        "wait behind"
     )
     return True
 

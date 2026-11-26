@@ -5169,7 +5169,8 @@ included, and `summary` did not output `posted` as `true`. So no reply is
 posted for a dispatch that `review`'s check steps or claim refuse (a failed claim
 posts its own reply), for a run whose claim reads taken, for a run cancelled
 while it waits in the queue or in `review` before the claim is recorded, or for a
-run whose `review` runner is lost, which loses the record; its
+call that fails before `review` records the claim, for example a load-time error or
+a `review` runner lost before its outputs: the run is red, and its
 `shipmate / apply run` check, if created, stays `in_progress` (§Apply run check).
 `actions/apply-summary` writes `posted` only after its result comment's POST
 succeeded. `review` outputs `unbound` as `true` just before its two refusals

@@ -703,20 +703,25 @@ def test_an_incomplete_then_complete_own_listing_names_the_holder(gh, capsys):
 
 
 _UNDECIDED = (
-    "::warning::could not tell whether run 50 waits for the group: its jobs listing was "
-    "incomplete or listed no review; the reply names the run it may wait behind"
+    "::warning::could not tell whether run 50 waits for the group: no complete jobs listing "
+    "showed its review pending, running or done; the reply names the run it may wait behind"
 )
 
 
 @pytest.mark.parametrize(
     "own_jobs",
-    [[([_QUEUE, _rv("pending")], False)], [([_QUEUE], True)]],
-    ids=["incomplete-throughout", "review-never-listed"],
+    [
+        [([_QUEUE, _rv("pending")], False)],
+        [([_QUEUE], True)],
+        [([_QUEUE, _rv("queued")], True)],
+    ],
+    ids=["incomplete-throughout", "review-never-listed", "review-queued"],
 )
 def test_an_undecided_own_listing_names_the_holder_and_warns(gh, capsys, own_jobs):
     """One listing and three re-lists, 3 s apart, then the holder is named as when this run
     waits. Mutations: undecided reads as no wait (final `return False`) -- red; drop the warning
-    -- red; `_OWN_RELISTS = 4` -- red; `_OWN_PAUSE = 2` -- red."""
+    -- red; `_OWN_RELISTS = 4` -- red; `_OWN_PAUSE = 2` -- red; read any listed `review` not
+    `pending` as no wait (`status is not None`) -- red (review-queued)."""
     gh.runs, gh.jobs, gh.own_jobs = _behind(own_jobs)
     gh.go()
     assert gh.cancels == [_cancel(40)]
@@ -726,7 +731,7 @@ def test_an_undecided_own_listing_names_the_holder_and_warns(gh, capsys, own_job
 
 
 def test_a_run_whose_own_review_runs_names_no_run(gh):
-    """Mutation: `_in_group_wait` reads `in_progress` as waiting -- red (45 named)."""
+    """Mutation: drop `"in_progress"` from the no-wait statuses -- red (re-listed, 45 named)."""
     gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("in_progress")], True)])
     gh.go()
     assert gh.cancels == [_cancel(40)]
