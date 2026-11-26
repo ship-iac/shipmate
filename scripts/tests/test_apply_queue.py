@@ -204,7 +204,8 @@ def test_an_incomplete_runs_listing_cancels_nothing_and_says_the_run_may_wait(gh
 
 
 def test_a_run_shipmate_did_not_dispatch_is_never_cancelled_and_is_named_so(gh):
-    """An untrusted run at an older head whose jobs only wait: no jobs read, no cancel.
+    """An untrusted run at an older head whose jobs only wait: only this run's own jobs read, no
+    cancel.
 
     Mutations: treat every listed run as trusted (`app_runs = others`) -- red (jobs read and
     cancelled); drop the untrusted sentence -- red."""
@@ -212,7 +213,7 @@ def test_a_run_shipmate_did_not_dispatch_is_never_cancelled_and_is_named_so(gh):
     gh.jobs = {30: (_j("waiting"), True), 40: (_j("waiting"), True)}
     gh.go()
     assert gh.cancels == []
-    assert gh.job_reads == []
+    assert gh.job_reads == [50]
     assert gh.posts == _reply(_FOREIGN.format(30))
 
 
@@ -303,14 +304,35 @@ def test_a_newer_run_that_holds_nothing_is_not_named(gh):
     assert gh.posts == []
 
 
-def test_an_auto_run_cancels_but_posts_no_reply(gh, monkeypatch):
-    """Mutation: drop the `SHIPMATE_AUTO` check -- red (posted)."""
-    gh.runs = [_r(40)]
-    gh.jobs = {40: (_j("waiting"), True)}
+def test_an_auto_run_posts_only_its_cancel_sentences(gh, monkeypatch):
+    """Holder 45 and untrusted run 30 are not named, and no waits marker is posted. Mutation:
+    drop the `SHIPMATE_AUTO` branch -- red (the whole reply under the marker)."""
+    gh.runs, gh.jobs, _ = _behind([])
+    gh.runs.append(_r(30, by_app=False))
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
     gh.go()
     assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_an_auto_run_that_cancelled_nothing_posts_nothing(gh, monkeypatch):
+    """Mutation: keep every sentence when nothing was cancelled (`if cancelled else said`) --
+    red (holder 45 named)."""
+    gh.runs = [_r(45, ref=_HEAD)]
+    gh.jobs = {45: ([_rv("in_progress")], True)}
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
+    gh.go()
     assert gh.posts == []
+
+
+def test_a_run_whose_own_call_ended_names_no_untrusted_run(gh):
+    """Mutation: gate only the holder on `own_waits` (`if holder and not own_waits(...)`, the
+    untrusted run kept) -- red (30 named)."""
+    gh.runs = [_r(30, by_app=False)]
+    gh.own_jobs = [([_QUEUE, _rv("completed"), _job("summary", "completed")], True)]
+    gh.go()
+    assert gh.posts == []
+    assert gh.job_reads == [50]
 
 
 def test_a_failed_cancel_keeps_the_run(gh, monkeypatch):

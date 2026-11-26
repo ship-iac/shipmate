@@ -6,8 +6,8 @@ Without an argument it runs in `apply.yml`'s `queue` job, beside this run's `run
 outside `shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `waiters` job, while
 this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
-header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
-`SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
+header's environment), `SHIPMATE_AUTO` (`true` posts only the cancel sentences),
+`SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
 `pull-requests: write`, and `actions: write` for the queue or `actions: read` for `waiters`).
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted run,
@@ -212,20 +212,21 @@ def cancel(repo, run_id):
 
 
 def queue(repo, pr, own, slug, self_by_app):
-    """`(sentences, named)`: the reply's sentences, after cancelling each stale run when
-    `self_by_app` and this run's own listed `ref` is the live head; `named` when they name the
-    run this one waits for, only while this run's own call waits for the group (`own_waits`, read
-    after the cancels and only when a run could be named)."""
+    """`(sentences, named, cancelled)`: the reply's sentences, after cancelling each stale run
+    when `self_by_app` and this run's own listed `ref` is the live head; `named` when they name
+    the run this one waits for; `cancelled` the runs cancelled. The holder and the untrusted run
+    are named only while this run's own call waits for the group (`own_waits`, read after the
+    cancels and only when a run could be named)."""
     runs, complete = apply_runs(repo, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
     if not complete:
-        return sentences(own, None, None, [], False), False
+        return sentences(own, None, None, [], False), False, []
     app_runs = [r for r in others if r["by_app"]]
     foreign = [r for r in others if not r["by_app"]]
     if head is None:
-        return sentences(own, None, (foreign or [None])[0], [], True), False
+        return sentences(own, None, (foreign or [None])[0], [], True), False, []
     jobs = {r["id"]: run_jobs(repo, r["id"]) for r in app_runs}
     stale = [
         r for r in app_runs if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])
@@ -236,10 +237,11 @@ def queue(repo, pr, own, slug, self_by_app):
     kept = [r for r in app_runs if r not in cancelled]
     holding = [r for r in kept if holds(jobs[r["id"]][0])]
     earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
-    holder = (earlier or [None])[0]
-    if holder and not own_waits(repo, own):
-        holder = None
-    return sentences(own, holder, (foreign or [None])[0], cancelled, True), holder is not None
+    holder, untrusted = (earlier or [None])[0], (foreign or [None])[0]
+    if (holder or untrusted) and not own_waits(repo, own):
+        holder = untrusted = None
+    said = sentences(own, holder, untrusted, cancelled, True)
+    return said, holder is not None, cancelled
 
 
 def _comment_link(repo, pr, comment_id):
@@ -356,11 +358,14 @@ def told(repo, pr, own, slug):
 def reply(repo, pr, own, slug, self_by_app):
     """`queue`, then its reply on pull request `pr`, under this run's `waits_marker` when it
     names the run this one waits for. When the App already told this run (`told`), the reply
-    drops the marker and the waits sentence, and posts only the rest, if any."""
-    said, named = queue(repo, pr, int(own), slug, self_by_app)
+    drops the marker and the waits sentence, and posts only the rest, if any. An `auto` run
+    posts only the cancel sentences, and nothing when it cancelled no run."""
+    said, named, cancelled = queue(repo, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
-    if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
+    if os.environ.get("SHIPMATE_AUTO") == "true":
+        said, named = (sentences(int(own), None, None, cancelled, True) if cancelled else []), False
+    if not said or not self_by_app:
         return
     # `sentences` puts the waits sentence first.
     if named and told(repo, pr, own, slug):

@@ -2170,7 +2170,8 @@ runner fails only `apply / queue`. It can end after `run` joined the group; its
 cancels do not depend on ending first.
 
 An `apply` run posts one ⚪ reply joining these sentences in this order, links
-built from run ids; an `auto` run posts none:
+built from run ids; an `auto` run posts only the cancel sentences, and nothing
+when it cancelled no run:
 
 - ``[the apply run](<url>) waits for [an earlier apply run](<url>) of this pull request to finish.``
   It names the trusted run holding the group (an unfinished job of its `run`
@@ -2183,7 +2184,8 @@ built from run ids; an `auto` run posts none:
   neither `pending`, running nor done. When the listings cannot tell, it names
   the run as above and the `queue` job warns.
 - ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
-  It names the untrusted run with the lowest run id.
+  It names the untrusted run with the lowest run id, and is left out, as the first
+  sentence is, when this run's own call's `review` is listed running or done.
 - ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
   One per cancelled run.
 - ``[the apply run](<url>) may wait for an earlier apply run of this pull request; its apply runs could not all be listed.``

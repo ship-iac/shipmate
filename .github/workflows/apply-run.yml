@@ -245,7 +245,7 @@ jobs:
 
   # Locks every cell the waves apply, then runs the first populated level's pre-flight, snapshot
   # and wave0 release. A cell another pull request took after `detect` read the locks refuses the
-  # run; a new `shipmate apply` or "Re-run all jobs" recomputes, "Re-run failed jobs" does not.
+  # run; a new `shipmate apply` recomputes.
   lock:
     needs: [review, detect]
     if: ${{ !failure() && !cancelled() && needs.review.outputs.admitted == 'true' }}
