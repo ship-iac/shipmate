@@ -138,10 +138,12 @@ GUARD_TAIL = {
 CHECK_STEP_COUNT = 6
 #: `inputs.pr_number` in canonical form, as an expression: it survives a number round trip
 #: unchanged (no leading zero, sign, exponent or space), is not the boolean `true` that
-#: `fromJSON` would also round-trip, and lies in 1 to 10 digits.
+#: `fromJSON` would also round-trip, lies in 1 to 10 digits, and holds no `.`: a fraction such
+#: as `1.5` also round-trips unchanged.
 CANONICAL_PR_NUMBER_CLAUSE = (
     "format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' "
-    "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10"
+    "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 "
+    "&& !contains(inputs.pr_number, '.')"
 )
 #: `apply.yml`'s whole `admit.if`, hand-written: every check step's condition negated, then the
 #: canonical number clause. An expression error skips the job like a false one.
@@ -157,7 +159,8 @@ ADMIT_IF = (
     "&& github.event.inputs.comment_id == '') "
     "&& format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number "
     "&& inputs.pr_number != 'true' "
-    "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 }}"
+    "&& fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 "
+    "&& !contains(inputs.pr_number, '.') }}"
 )
 #: `apply.yml`'s whole `guard.if`. A run cancelled before `admit` starts also reads it
 #: skipped, and must not reach the no-rule step.
@@ -253,7 +256,8 @@ def _body(expression):
 
 
 def test_admit_if_is_this_whole_expression():
-    """Mutations: delete the actor clause -- red; delete the `< 1e10` clause -- red."""
+    """Mutations: delete the actor clause -- red; delete the `< 1e10` clause -- red; delete the
+    `!contains(inputs.pr_number, '.')` clause -- red."""
     assert workflow_jobs("apply.yml")["admit"]["if"] == ADMIT_IF
 
 
