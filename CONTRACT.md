@@ -504,10 +504,10 @@ off the pull request's checks list.
     the `uses:` permission cap is already high enough; `lock` requests
     `actions: read` and `checks: read` itself. A hand-written wrapper
     calling `apply-env-level.yml` must grant it. The environment check uses no
-    App key or App permission. The same job binds `shipmate-engine`, verifies
+    App key or App permission. The pre-flight job binds `shipmate-engine`, verifies
     the App key arrived and mints an App token whose only use is to prove the
-    key authenticates, so a missing, revoked or wrong key fails `snapshot`
-    before any wave; `lock` mints its own tokens before its flip.
+    key authenticates, so a missing, revoked or wrong key fails the pre-flight
+    job (`lock` for the first level, `snapshot` for later ones) before any wave.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names

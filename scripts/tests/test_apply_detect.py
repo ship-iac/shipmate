@@ -822,7 +822,7 @@ def test_an_invalid_environment_name_writes_no_refused_by_rule(monkeypatch, tmp_
 
 def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path):
     """The default in `os.environ.get("SHIPMATE_REVIEW_DECISION", "")` is the whole fail-closed
-    behaviour when the review job's output never reaches the action. Every other main() test
+    behaviour when `detect`'s `pr` step output never reaches the action. Every other main() test
     sets the variable, so without this case the default could be flipped to "APPROVED"
     unnoticed."""
     _apply_env(monkeypatch, tmp_path)
