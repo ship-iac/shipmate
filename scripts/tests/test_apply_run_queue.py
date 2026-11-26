@@ -9,8 +9,9 @@ compared whole against a hand-written constant.
 import re
 
 from _loader import ENGINE, action_yaml, workflow_jobs, workflow_yaml
+from test_apply_dispatch_actor_guard import ADMIT_IF, CHECK_STEP_COUNT
 
-#: The whole top-level `concurrency:` of `apply-run.yml`. `guard` refuses a non-canonical
+#: The whole top-level `concurrency:` of `apply-run.yml`. `admit` refuses a non-canonical
 #: `pr_number` before the call, so the key needs no fallback.
 APPLY_RUN_CONCURRENCY = {
     "group": "shipmate-apply-${{ inputs.pr_number }}",
@@ -21,11 +22,8 @@ APPLY_RUN_CONCURRENCY = {
 #: The whole `run` job of `apply.yml`. `permissions` is the union `apply-run.yml`'s jobs request;
 #: `with` forwards every input; `secrets` names each one `apply-run.yml` declares.
 RUN_JOB = {
-    "needs": ["guard", "admit"],
-    "if": (
-        "${{ !cancelled() && needs.guard.result == 'success' && "
-        "(needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}"
-    ),
+    "needs": ["admit"],
+    "if": "${{ !cancelled() && needs.admit.outputs.admitted == 'true' }}",
     "uses": "./.github/workflows/apply-run.yml",
     "permissions": {
         "contents": "read",
@@ -89,8 +87,8 @@ def test_apply_run_queues_one_run_per_pull_request():
 
 
 def test_no_apply_yml_job_sits_in_a_concurrency_group():
-    """`guard` must refuse and `outcome` must answer while a run waits in the queue, so neither
-    joins a group; a group on `run` would queue the call a second time.
+    """`admit` and `guard` must refuse and `outcome` must answer while a run waits in the queue,
+    so none joins a group; a group on `run` would queue the call a second time.
 
     Mutation: give `run` the group `shipmate-apply-${{ inputs.pr_number }}` -- red."""
     grouped = {j for j, job in workflow_jobs("apply.yml").items() if "concurrency" in job}
@@ -116,21 +114,23 @@ def test_actionlint_ignores_only_result_and_cache_mode_in_apply_run():
 
 
 def test_the_run_job_is_this_whole_job():
-    """Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
-    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; drop
-    the `admitted` clause, and a `taken` run of a comment applies a second time -- red; key it on
-    `needs.admit.result == 'success'`, and a failed queue step stops the apply -- red; drop
-    `|| github.event.inputs.comment_id == ''`, and an `auto` run depends on `admit`'s outputs,
-    which a lost `admit` runner leaves empty -- red; drop `admit` from `needs`, and its outputs
-    read empty -- red."""
+    """`admitted` alone admits, for an `auto` run too: it is written only after `admit`'s check
+    steps and claim passed, and a lost `admit` runner leaves it empty, so nothing runs.
+
+    Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
+    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; key it on
+    `needs.admit.result == 'success'`, and a failed queue step stops the apply -- red; append
+    `|| github.event.inputs.comment_id == ''`, and an `auto` run starts past a check step that
+    refused -- red; add `guard` to `needs` -- red."""
     assert workflow_jobs("apply.yml")["run"] == RUN_JOB
 
 
-#: The whole `admit` job of `apply.yml`. No job-token permission: its writes use the App token,
-#: and only under the trust rule `scripts/apply-queue` applies. `admitted` is `true` or unset.
+#: The whole `admit` job of `apply.yml`, its steps after `guard`'s six check steps, which
+#: `test_apply_dispatch_actor_guard.py` pins with `admit.if`. No job-token permission: its
+#: writes use the App token, and only under the trust rule `scripts/apply-queue` applies.
+#: `admitted` is `true` or unset.
 ADMIT_JOB = {
-    "needs": ["guard"],
-    "if": "${{ !cancelled() && needs.guard.result == 'success' }}",
+    "if": ADMIT_IF,
     "runs-on": "ubuntu-slim",
     "environment": {"name": "shipmate-engine", "deployment": False},
     "permissions": {},
@@ -189,18 +189,19 @@ QUEUE_STEP_ENV = {
 
 
 def test_the_admit_job_is_this_whole_job():
-    """A guard refusal skips `admit`; a `taken` or failed claim writes no `admitted`; an `auto`
-    dispatch skips the claim step and is admitted by its empty `comment_id`. Mutations:
-    `permissions: { actions: write }` -- red; drop `needs.guard.result == 'success' &&` from
-    `admit.if`, and a guard refusal starts the claim, because `!cancelled()` drops the implicit
-    success of `needs: guard` -- red; drop the admit step's `if:` (admitted unconditionally, so a
-    `taken` claim applies) -- red; `!= 'owned'` in it -- red; drop its
-    `|| github.event.inputs.comment_id == ''` (no `auto` run is admitted) -- red; drop the queue
-    step's `if:` -- red; add `continue-on-error: true` to the queue step -- red; drop `auto`
-    from its `with` -- red; drop the claim step's `comment_id` clause -- red; pass
-    `github.event.inputs.pr_number` (unvalidated) as its `pr-number` -- red; drop `environment`
-    from its `with` -- red."""
-    assert workflow_jobs("apply.yml")["admit"] == ADMIT_JOB
+    """A refused check step skips every later step; a `taken` or failed claim writes no
+    `admitted`; an `auto` dispatch skips the claim step and is admitted by its empty
+    `comment_id`. The admit step's `if:` carries no status function, so a failed check step
+    skips it. Mutations: `permissions: { actions: write }` -- red; prefix the admit step's `if:`
+    with `always() && ` -- red; drop it (admitted unconditionally, so a `taken` claim applies)
+    -- red; `!= 'owned'` in it -- red; drop its `|| github.event.inputs.comment_id == ''` (no
+    `auto` run is admitted) -- red; drop the queue step's `if:` -- red; add
+    `continue-on-error: true` to the queue step -- red; drop `auto` from its `with` -- red;
+    drop the claim step's `comment_id` clause -- red; pass `github.event.inputs.pr_number`
+    (unvalidated) as its `pr-number` -- red; drop `environment` from its `with` -- red; move the
+    check-step aliases after `claim` -- red; drop the canonical-number alias -- red."""
+    job = workflow_jobs("apply.yml")["admit"]
+    assert {**job, "steps": job["steps"][CHECK_STEP_COUNT:]} == ADMIT_JOB
 
 
 def test_the_queue_action_mints_these_permissions_and_passes_both_actors():
