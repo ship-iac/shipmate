@@ -10,6 +10,7 @@ against a hand-written constant.
 """
 
 from _loader import ENGINE_ENVIRONMENT, action_yaml, workflow_jobs
+from test_apply_run_check_wiring import REVIEW_STEP
 
 _WITH = {
     "pr-number": "${{ inputs.pr_number }}",
@@ -31,6 +32,7 @@ WAITERS_JOB = {
     "needs": ["review"],
     "if": "${{ needs.review.result == 'success' }}",
     "runs-on": "ubuntu-slim",
+    "timeout-minutes": 3,
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
 }
@@ -78,14 +80,16 @@ def test_the_waiters_job_steps_are_whole():
 
 def test_the_waiters_job_is_this_whole_mapping():
     """Mutations: `if: ${{ always() }}` -- red; `permissions: { pull-requests: write }` --
-    red."""
+    red; drop `timeout-minutes` -- red."""
     job = workflow_jobs("apply-run.yml")["waiters"]
     assert {k: v for k, v in job.items() if k != "steps"} == WAITERS_JOB
 
 
 def test_review_ends_with_the_run_check():
-    """Mutation: move the waiters step back to the end of `review` -- red."""
-    assert _steps("review")[-1]["name"] == "Show the running apply on the pull request"
+    """The run check step, whole (`test_apply_run_check_wiring.py`'s hand-written constant).
+    Mutations: move the waiters step back to the end of `review` -- red; `timeout-minutes: 2`
+    on the run check step -- red."""
+    assert _steps("review")[-1] == REVIEW_STEP
 
 
 def test_waiters_holds_the_only_waiters_step():

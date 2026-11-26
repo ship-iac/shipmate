@@ -89,11 +89,13 @@ jobs:
     needs: [review]
     if: ${{ needs.review.result == 'success' }}
     runs-on: ubuntu-slim
+    # Bounds a hung setup; it does not bound runner pickup or a lost runner.
+    timeout-minutes: 3
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
       # The action verifies the App key itself. A failure or a hung API call here must not fail
-      # the run.
+      # the job.
       - name: Tell the apply runs waiting behind this one
         uses: $/actions/apply-waiters
         continue-on-error: true

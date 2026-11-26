@@ -2188,8 +2188,7 @@ posts nothing; an `auto` holder replies. An `auto` waiting run has no comment an
 a run the App did not dispatch is not trusted; neither is told. The step is
 display only: a failed listing or POST warns and the step exits 0, and it holds
 `continue-on-error: true` and `timeout-minutes: 1`, so neither it nor a hung
-call fails `waiters`. No job needs `waiters`, so `summary`'s result comment does
-not read it.
+call fails `waiters`.
 
 A cancelled stale run writes, by where it waited:
 
@@ -2226,7 +2225,8 @@ These limits are accepted:
   when the comments listing does not yet show an earlier reply.
 - An unfinished `waiters` job keeps its run holding the group, so the next run
   starts only once it ends, and a stale run whose `waiters` job is pending is not
-  cancelled.
+  cancelled. That lasts while the job waits for a runner, and while a lost
+  `waiters` runner goes unnoticed: GitHub ends that job after about 45 minutes.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -2545,7 +2545,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     apply checks pending, so no refresh greens the gate until they apply. An
     apply `summary` cancelled after its result comment posted refreshes no gate:
     the gate keeps its last write until the next refresh, and `outcome` posts no
-    reply, since the comment posted;
+    reply, since the comment posted. A comment step stopped at its 10-minute
+    limit after its POST landed leaves `posted` unwritten, so `outcome` may post
+    an ended reply beside the result comment;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
     superseded deploy, unless a cell's apply check is titled `State not saved`
