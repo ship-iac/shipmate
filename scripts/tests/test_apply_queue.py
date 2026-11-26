@@ -62,7 +62,7 @@ def _save(cell, status, steps=()):
 
 
 _GUARD = {"name": "apply / guard", "status": "in_progress"}
-_ADMIT = {"name": "apply / admit", "status": "completed"}
+_QUEUE = {"name": "apply / queue", "status": "in_progress"}
 
 
 def _marked(comments, marker):
@@ -78,7 +78,8 @@ def _marked(comments, marker):
 @pytest.fixture
 def gh(monkeypatch):
     """Run `main` against recorded reads; returns the recorder. Set `runs`, `complete`, `jobs`
-    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`."""
+    ({id: (jobs, complete)}), `own_jobs` (this run's listings, one per read, the last repeated)
+    and `heads` (one per read) before calling `go`."""
     for k, v in {
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "o/r",
@@ -95,7 +96,9 @@ def gh(monkeypatch):
 
     class Rec:
         runs, complete, jobs, heads, own_ref, own_row = [], True, {}, [_HEAD, _HEAD], _HEAD, True
-        cancels, posts, job_reads = [], [], []
+        cancels, posts, job_reads, sleeps = [], [], [], []
+        #: This run's call waits for the group by default, so a holder is named.
+        own_jobs = [([_QUEUE, _rv("pending")], True)]
         #: `(login, body)` of the pull request's comments; each post adds the App's.
         comments, marker_reads = [], []
         go = waiters = None
@@ -109,8 +112,7 @@ def gh(monkeypatch):
 
     def run_jobs(repo, run_id):
         rec.job_reads.append(run_id)
-        own = ([_ADMIT, *_j("in_progress")], True)
-        return rec.jobs.get(run_id, own if run_id == 50 else ([], False))
+        return _next(rec.own_jobs) if run_id == 50 else rec.jobs.get(run_id, ([], False))
 
     def pr_head(repo, pr):
         return rec.heads.pop(0), False, "open"
@@ -131,12 +133,18 @@ def gh(monkeypatch):
     monkeypatch.setattr(aq, "apply_runs", apply_runs)
     monkeypatch.setattr(aq, "run_jobs", run_jobs)
     monkeypatch.setattr(aq, "pr_head", pr_head)
+    monkeypatch.setattr(aq.time, "sleep", rec.sleeps.append)
     monkeypatch.setattr(aq, "_run", run)
     monkeypatch.setattr(aq.rc, "post", post)
     monkeypatch.setattr(aq.uc, "marker_comments", marker_comments)
     rec.go = aq.main
     rec.waiters = lambda: _main_waiters(monkeypatch)
     return rec
+
+
+def _next(listings):
+    """The first of `listings`, removed while another follows: the last one repeats."""
+    return listings.pop(0) if len(listings) > 1 else listings[0]
 
 
 def _main_waiters(monkeypatch):
@@ -349,12 +357,12 @@ def test_this_run_is_neither_named_nor_cancelled(gh):
 
 def test_a_job_outside_the_run_call_neither_holds_the_group_nor_keeps_a_stale_run(gh):
     """A newer run still in its `guard` holds nothing, so it is not named; a stale run whose
-    `admit` is listed `completed` beside its waiting call is cancelled.
+    `queue` is listed `in_progress` beside its waiting call is cancelled.
 
     Mutations: `in_call` returns every job -- red (60 named as the holder); `_IN_CALL` as
     `" / guard"` -- red (40 kept)."""
     gh.runs = [_r(40), _r(60, ref=_HEAD)]
-    gh.jobs = {40: ([_ADMIT, *_j("waiting")], True), 60: ([_GUARD], True)}
+    gh.jobs = {40: ([_QUEUE, *_j("waiting")], True), 60: ([_GUARD], True)}
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
@@ -441,7 +449,7 @@ def test_a_wave_pending_on_its_cell_group_after_an_earlier_wave_applied_is_kept(
 
 def test_a_run_whose_call_waits_for_the_group_is_cancelled(gh):
     """Mutation: drop the `_in_group_wait` branch of `idle` -- red (kept)."""
-    gh.runs, gh.jobs = _stale([_ADMIT, _rv("pending")])
+    gh.runs, gh.jobs = _stale([_QUEUE, _rv("pending")])
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
@@ -629,6 +637,79 @@ def test_a_run_at_an_older_head_cancels_no_peer_at_a_third_head(gh):
     assert gh.cancels == []
 
 
+def _behind(own_jobs):
+    """Stale run 40 waiting on an approval, run 45 holding the group at the live head, and this
+    run's own listings `own_jobs`."""
+    return (
+        [_r(40), _r(45, ref=_HEAD)],
+        {
+            40: (_j("waiting"), True),
+            45: ([_rv("completed"), _job("L0 / dev / app / apply", "in_progress")], True),
+        },
+        own_jobs,
+    )
+
+
+def test_a_run_whose_own_call_waits_names_the_holder(gh):
+    """This run's `review` is `pending` on its first listing: one own read, no pause. Mutation:
+    skip the own-wait check (`if holder and False`) -- red (no own read)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("pending")], True)])
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _held(_WAITS.format(45), _CANCELLED.format(40))
+    assert (gh.job_reads, gh.sleeps) == ([40, 45, 50], [])
+
+
+def test_a_run_already_holding_the_group_names_no_run(gh):
+    """This run's call is past `review`, an older run 30 still waits at the live head.
+    Mutation: skip the own-wait check (`if holder and False`) -- red (30 named)."""
+    gh.runs = [_r(30, ref=_HEAD), _r(40)]
+    gh.jobs = {30: ([_rv("pending")], True), 40: (_j("waiting"), True)}
+    gh.own_jobs = [([_QUEUE, _rv("completed"), _job("detect", "in_progress")], True)]
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_a_run_whose_own_call_ended_names_no_newer_holder(gh):
+    """Mutation: skip the own-wait check -- red (45 named)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind(
+        [([_QUEUE, _rv("completed"), _job("summary", "completed")], True)]
+    )
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_a_review_listed_on_the_second_own_listing_names_the_holder(gh):
+    """Mutation: list the own jobs once (`range(1)`) -- red (no holder named)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE], True), ([_QUEUE, _rv("pending")], True)])
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _held(_WAITS.format(45), _CANCELLED.format(40))
+    assert (gh.job_reads, gh.sleeps) == ([40, 45, 50, 50], [3])
+
+
+def test_a_review_never_listed_names_no_run(gh):
+    """One listing and three re-lists, 3 s apart. Mutations: `_OWN_RELISTS = 4` -- red;
+    `_OWN_PAUSE = 2` -- red."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE], True)])
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+    assert (gh.job_reads, gh.sleeps) == ([40, 45, 50, 50, 50, 50], [3, 3, 3])
+
+
+def test_an_incomplete_own_listing_names_no_run(gh):
+    """Its `review` is listed `pending`, but a hidden job may show the call past it. Mutation:
+    drop the `not complete` return of `own_waits` -- red (45 named)."""
+    gh.runs, gh.jobs, gh.own_jobs = _behind([([_QUEUE, _rv("pending")], False)])
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+    assert gh.job_reads == [40, 45, 50]
+
+
 _PULL = "https://github.com/o/r/pull/7#issuecomment-"
 
 
@@ -649,7 +730,7 @@ def _told(waiter, comment="11"):
 
 def _waiting(*ids):
     """Runs `ids`, each App-dispatched at the live head with its call waiting for the group."""
-    return [_r(i, ref=_HEAD) for i in ids], {i: ([_ADMIT, _rv("pending")], True) for i in ids}
+    return [_r(i, ref=_HEAD) for i in ids], {i: ([_QUEUE, _rv("pending")], True) for i in ids}
 
 
 def _warnings(capsys):
@@ -664,7 +745,7 @@ def test_a_waiting_run_is_told_once_which_run_it_waits_behind(gh, monkeypatch):
     red; this run's id in the marker -- red; `SHIPMATE_ENV` in the header -- red."""
     monkeypatch.setenv("SHIPMATE_ENV", "dev-eu")
     gh.runs = [_r(40, ref=_HEAD, comment="6902658567")]
-    gh.jobs = {40: ([_ADMIT, _rv("pending")], True)}
+    gh.jobs = {40: ([_QUEUE, _rv("pending")], True)}
     gh.waiters()
     assert gh.posts == [_told(40, "6902658567")]
     assert gh.marker_reads == [("o/r", "7", "<!-- shipmate:waits-")]
