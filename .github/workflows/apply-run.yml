@@ -332,8 +332,8 @@ jobs:
       base_sha: ${{ needs.detect.outputs.base_sha }}
       by_wave: ${{ needs.detect.outputs.first_level == '0' && needs.lock.outputs.by_wave || '' }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
-    # consumer's `complete` job would hold no key, its applies would execute, and their apply
-    # checks would strand pending forever.
+    # consumer's `complete` job and cells' `save` jobs would hold no key, its applies would
+    # execute, and their apply checks would strand pending forever.
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard

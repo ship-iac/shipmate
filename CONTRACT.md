@@ -184,10 +184,10 @@ A cell's state counts as saved when its `save` job's `Save the cell's state`
 step succeeded, whatever the job's conclusion. A `save` job that fails after
 that step, at the check write, saved the state: its wave fails, so later waves
 and environment levels do not start, and the level's `complete` writes the
-cell's check `success`. A `save` job that ends before that step reports
-`success`, including one GitHub rejects before its first step under
-`shipmate-engine`'s deployment branch policy or protection rules, did not
-save, and a cell whose apply may have run is held.
+cell's check `success`. A `save` job that ends or is rejected before
+`Save the cell's state` reports `success` did not save; GitHub rejects one
+before its first step under `shipmate-engine`'s deployment branch policy or
+protection rules. A cell whose apply may have run is then held.
 
 A pre-merge apply run reads its pull request before it writes. Once the pull
 request has merged, the run writes only its `success` and held writes and

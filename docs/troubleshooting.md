@@ -1441,11 +1441,13 @@ section's name, in one of these forms:
 
 A cell on a remote backend is held the same way when its `apply` job ends
 before it hands its state off, for example on a lost runner: the `save` job
-cannot tell the backend without that output. It is held too when its `save`
-job ends, or is rejected, before `Save the cell's state` reports `success`. Its state is in the backend, which
+cannot tell the backend without that output. Its state is in the backend, which
 shipmate never saves, so the steps below do not apply. Return or complete its
 check as in
 [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand).
+
+A cell on any backend is held too when its `save` job ends, or is rejected,
+before `Save the cell's state` reports `success`.
 
 A `save` job that fails after `Save the cell's state` succeeded, at
 `Complete this cell's apply check`, saved the state; this section does not
@@ -3410,10 +3412,11 @@ The `shipmate-engine` environment's deployment branch policy names a branch that
 does not exist — a typo, or a repository whose default branch is not `main`. A
 policy naming a nonexistent branch fails closed: the completion job is denied
 `SHIPMATE_APP_PRIVATE_KEY`, so it can mint no App token and can complete no
-check. A `save` job it rejects also saves no state: follow
-§`The apply step ran and its state was not saved`. Fix the policy per `github-app.md` §5, which reads each repository's own
+check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
+Then, for a cell whose `save` job the policy rejected, which saved no state,
+follow §`The apply step ran and its state was not saved`.
 
 ### `waiting 60 s for GitHub's secondary rate limit, then retrying: command failed (1): gh api ...`
 
