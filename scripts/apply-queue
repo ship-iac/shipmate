@@ -18,8 +18,9 @@ approval or that cell's `save` listing no steps. An incomplete runs listing or a
 cancels nothing, and a failed first head read skips the jobs reads. Only a run whose own listed
 `ref` is the live head cancels: a run not at the live head is stale itself and leaves stale runs to
 a run at the live head; a run missing from its own listing cancels nothing. An untrusted run is
-never cancelled. The queue reply names the holder only while this run's own call waits for the
-group (`own_waits`), and then starts with this run's `waits_marker`.
+never cancelled. The queue reply names the holder and the untrusted run only while this run's
+own call waits for the group (`own_waits`, never read for an `auto` run), and starts with this
+run's `waits_marker` when it names the holder.
 
 `waiters` tells each App-dispatched run with a command comment whose call waits for the group,
 once per run across the `queue` and `waiters` jobs: a run whose `waits_marker` starts a
@@ -211,12 +212,20 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, pr, own, slug, self_by_app):
+def _while_waiting(repo, own, auto, *named):
+    """`named`, or as many Nones unless this run's own call waits for the group (`own_waits`,
+    read only when one is set). An `auto` run names none and reads nothing: its reply holds only
+    cancel sentences."""
+    if any(named) and (auto or not own_waits(repo, own)):
+        return (None,) * len(named)
+    return named
+
+
+def queue(repo, pr, own, slug, self_by_app, auto=False):
     """`(sentences, named, cancelled)`: the reply's sentences, after cancelling each stale run
     when `self_by_app` and this run's own listed `ref` is the live head; `named` when they name
     the run this one waits for; `cancelled` the runs cancelled. The holder and the untrusted run
-    are named only while this run's own call waits for the group (`own_waits`, read after the
-    cancels and only when a run could be named)."""
+    are named only as `_while_waiting` allows, read after the cancels."""
     runs, complete = apply_runs(repo, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
@@ -226,7 +235,8 @@ def queue(repo, pr, own, slug, self_by_app):
     app_runs = [r for r in others if r["by_app"]]
     foreign = [r for r in others if not r["by_app"]]
     if head is None:
-        return sentences(own, None, (foreign or [None])[0], [], True), False, []
+        (untrusted,) = _while_waiting(repo, own, auto, (foreign or [None])[0])
+        return sentences(own, None, untrusted, [], True), False, []
     jobs = {r["id"]: run_jobs(repo, r["id"]) for r in app_runs}
     stale = [
         r for r in app_runs if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])
@@ -237,9 +247,9 @@ def queue(repo, pr, own, slug, self_by_app):
     kept = [r for r in app_runs if r not in cancelled]
     holding = [r for r in kept if holds(jobs[r["id"]][0])]
     earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
-    holder, untrusted = (earlier or [None])[0], (foreign or [None])[0]
-    if (holder or untrusted) and not own_waits(repo, own):
-        holder = untrusted = None
+    holder, untrusted = _while_waiting(
+        repo, own, auto, (earlier or [None])[0], (foreign or [None])[0]
+    )
     said = sentences(own, holder, untrusted, cancelled, True)
     return said, holder is not None, cancelled
 
@@ -360,10 +370,11 @@ def reply(repo, pr, own, slug, self_by_app):
     names the run this one waits for. When the App already told this run (`told`), the reply
     drops the marker and the waits sentence, and posts only the rest, if any. An `auto` run
     posts only the cancel sentences, and nothing when it cancelled no run."""
-    said, named, cancelled = queue(repo, pr, int(own), slug, self_by_app)
+    auto = os.environ.get("SHIPMATE_AUTO") == "true"
+    said, named, cancelled = queue(repo, pr, int(own), slug, self_by_app, auto)
     for line in said:
         print(line)
-    if os.environ.get("SHIPMATE_AUTO") == "true":
+    if auto:
         said, named = (sentences(int(own), None, None, cancelled, True) if cancelled else []), False
     if not said or not self_by_app:
         return

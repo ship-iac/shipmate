@@ -217,6 +217,20 @@ def test_a_run_shipmate_did_not_dispatch_is_never_cancelled_and_is_named_so(gh):
     assert gh.posts == _reply(_FOREIGN.format(30))
 
 
+def test_a_failed_head_read_names_no_untrusted_run_past_its_own_review(gh, monkeypatch):
+    """This run's own `review` completed. Mutation: return the untrusted run on the
+    failed-head-read path without `_while_waiting` -- red (30 named)."""
+
+    def pr_head(repo, pr):
+        raise SystemExit("HTTP 502")
+
+    monkeypatch.setattr(aq, "pr_head", pr_head)
+    gh.runs = [_r(30, by_app=False)]
+    gh.own_jobs = [([_QUEUE, _rv("completed")], True)]
+    gh.go()
+    assert (gh.cancels, gh.posts, gh.job_reads) == ([], [], [50])
+
+
 def test_an_incomplete_jobs_listing_keeps_its_run(gh):
     """Mutation: drop `jobs[...][1]` from the stale test -- red (cancelled)."""
     gh.runs = [_r(40)]
@@ -305,14 +319,16 @@ def test_a_newer_run_that_holds_nothing_is_not_named(gh):
 
 
 def test_an_auto_run_posts_only_its_cancel_sentences(gh, monkeypatch):
-    """Holder 45 and untrusted run 30 are not named, and no waits marker is posted. Mutation:
-    drop the `SHIPMATE_AUTO` branch -- red (the whole reply under the marker)."""
+    """Holder 45 and untrusted run 30 are not named, no waits marker is posted, and this run's
+    own jobs are not read. Mutations: drop the `SHIPMATE_AUTO` branch of `reply` -- red (the
+    whole reply under the marker); drop `auto or` from `_while_waiting` -- red (own jobs read)."""
     gh.runs, gh.jobs, _ = _behind([])
     gh.runs.append(_r(30, by_app=False))
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
+    assert (gh.job_reads, gh.sleeps) == ([40, 45], [])
 
 
 def test_an_auto_run_that_cancelled_nothing_posts_nothing(gh, monkeypatch):
