@@ -2021,21 +2021,93 @@ def test_the_deadline_refusal_names_the_lowest_live_run(monkeypatch, tmp_path):
 
 
 def test_an_incomplete_listing_polls_again(monkeypatch, tmp_path):
-    """Mutation: refuse on the first incomplete listing."""
+    """Mutations: sleep `PLAN_POLL` after every unsettled poll (`[30]`); settle on an
+    incomplete, empty listing (no sleep)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], "failed"), ([], True)])
     ad.main()
     assert _applied_cells(out) == ["stacks/app"]
-    assert clock.sleeps == [30]
+    assert clock.sleeps == [3]
+
+
+def _wait(monkeypatch, tmp_path, polls, reads=None):
+    """`wait_for_plans` called directly over `plan_polls`: `(waited set, clock)`."""
+    _, clock, _ = _waiting(monkeypatch, tmp_path, polls, reads)
+    return ad.wait_for_plans("acme/iac", PR_NUMBER), clock
+
+
+def test_an_incomplete_empty_listing_relists_soon(monkeypatch, tmp_path):
+    """Mutation: sleep `PLAN_POLL` after every unsettled poll (`[30]`)."""
+    waited, clock = _wait(monkeypatch, tmp_path, [([], "short"), ([], True)])
+    assert waited == set()
+    assert clock.sleeps == [3]
+
+
+def test_the_short_relists_are_bounded(monkeypatch, tmp_path):
+    """Seven incomplete, empty listings. Mutations: drop the `relists < PLAN_RELISTS` bound
+    (seven 3s); bound 6 (six 3s)."""
+    waited, clock = _wait(monkeypatch, tmp_path, [([], "short")] * 7 + [([], True)])
+    assert waited == set()
+    assert clock.sleeps == [3, 3, 3, 3, 3, 30, 30]
+
+
+def test_an_incomplete_listing_with_a_live_run_polls_at_the_long_interval(monkeypatch, tmp_path):
+    """Run 9 is listed on an incomplete listing, then reads `completed` by id under an
+    incomplete, empty one. Mutation: drop `not live` from the short-sleep test (`[3, 3, 5]`)."""
+    waited, clock = _wait(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], "short"), ([], "short"), ([], True)],
+        {9: ["completed"]},
+    )
+    assert waited == {"9"}
+    assert clock.sleeps == [30, 3, 5]
+
+
+def test_an_incomplete_listing_with_an_unread_run_polls_at_the_long_interval(monkeypatch, tmp_path):
+    """Run 9 drops off an incomplete listing and its by-id read fails once. Mutation: drop
+    `not unread` from the short-sleep test (`[30, 3, 5]`)."""
+    waited, clock = _wait(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], True), ([], "short"), ([], True)],
+        {9: [GH_FAILED, "completed"]},
+    )
+    assert waited == {"9"}
+    assert clock.sleeps == [30, 30, 5]
+
+
+def test_only_incomplete_empty_listings_spend_the_short_relists(monkeypatch, tmp_path):
+    """Polls: incomplete-empty, run 9 live, incomplete-empty x4, 9 unread, incomplete-empty x2,
+    complete. Mutations: count every unsettled poll against the bound (`[3, 30, 3, 3, 3, 30,
+    ...]`); reset the count after a live poll (a 3 after the unread poll). The final 5 is
+    `PLAN_SETTLE`: run 9 was waited for."""
+    polls = [([], "short"), ([_LIVE_9], "short")] + [([], "short")] * 7 + [([], True)]
+    reads = {9: ["completed"] * 4 + [GH_FAILED, "completed"]}
+    waited, clock = _wait(monkeypatch, tmp_path, polls, reads)
+    assert waited == {"9"}
+    assert clock.sleeps == [3, 30, 3, 3, 3, 3, 30, 30, 30, 5]
+
+
+def test_each_wait_gets_its_own_short_relists(monkeypatch, tmp_path):
+    """Two waits in one process, each over five incomplete, empty listings. Mutation: keep the
+    count in a module global (the second wait sleeps 30s)."""
+    polls = ([([], "short")] * 5 + [([], True)]) * 2
+    first, clock = _wait(monkeypatch, tmp_path, polls)
+    second = ad.wait_for_plans("acme/iac", PR_NUMBER)
+    assert (first, second) == (set(), set())
+    assert clock.sleeps == [3] * 10
 
 
 @pytest.mark.parametrize("complete", ["failed", "short"])
 def test_a_listing_incomplete_until_the_deadline_fails(monkeypatch, tmp_path, complete):
-    """A failed read, or a page whose `total_count` exceeds its runs, on every poll. Mutations:
-    treat `complete` false as an empty listing (the cell applies); pass `counted=False` (short
-    applies)."""
+    """A failed read, or a page whose `total_count` exceeds its runs, on every poll: five
+    `PLAN_RELIST` sleeps, then `PLAN_POLL` ones cut to the deadline, 480 seconds in all.
+    Mutations: treat `complete` false as an empty listing (the cell applies); pass
+    `counted=False` (short applies); settle on an incomplete, empty listing (the cell applies);
+    drop the deadline cap on the sleep (sixteen 30s, 495 seconds)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], complete)])
     assert _refused(out) == f"refusal={_UNLISTED}\n"
-    assert clock.sleeps == [30] * 16
+    assert clock.sleeps == [3] * 5 + [30] * 15 + [15]
 
 
 def test_a_listing_incomplete_after_a_live_one_fails_at_the_deadline(monkeypatch, tmp_path):

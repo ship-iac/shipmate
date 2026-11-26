@@ -2055,7 +2055,7 @@ the pull request is live: a `workflow_dispatch` run of `shipmate.yml` by any
 actor whose title is a `shipmate plan` of this pull request (§Check names),
 listed `requested`, `pending`, `queued`, `waiting` or `in_progress`.
 Autoplans are not listed. It waits after its own pull-request read and before it reads the
-head's checks, polling every 30 seconds for up to 8 minutes of elapsed time; a
+head's checks, sleeping at most 30 seconds between polls for up to 8 minutes of elapsed time; a
 run that starts during the wait joins it within the same 8 minutes. An `auto`
 apply does not wait (§`apply_mode: auto`, Newer plan). The apply then applies
 the records as they stand once no `shipmate plan` run of the pull request is
