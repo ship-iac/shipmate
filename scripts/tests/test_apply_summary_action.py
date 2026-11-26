@@ -186,19 +186,41 @@ def _summary_job_step(name):
 
 #: The `summary` job's step names, in order, hand-written.
 _SUMMARY_JOB_STEPS = [
-    "Complete gate if every apply check is done",
     "Download apply cell summaries",
     "Download the apply report",
     "Warn on apply cell summaries download failure",
     "Post apply result comment",
+    "Complete gate if every apply check is done",
     "End the running apply check",
 ]
 
 
 def test_the_downloads_precede_the_comment_that_reads_them():
-    """Mutation: move `Download apply cell summaries` after `Post apply result comment`."""
+    """The comment posts before the gate refresh, and `finish` stays last: it can sleep.
+    Mutations: move `Download apply cell summaries` after `Post apply result comment`; move
+    the gate step back first -- each red."""
     steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
     assert [s.get("name") for s in steps] == _SUMMARY_JOB_STEPS
+
+
+#: The gate refresh step, hand-written.
+_GATE_REFRESH = {
+    "name": "Complete gate if every apply check is done",
+    "if": "${{ !cancelled() }}",
+    "uses": "$/actions/gate-refresh",
+    "with": {
+        "head-sha": "${{ inputs.ref }}",
+        "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+        "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+    },
+}
+
+
+def test_the_gate_refreshes_after_a_failed_comment():
+    """`!cancelled()`: a failed comment step still refreshes the gate, where an implicit
+    `success()` skips it, and `always()` would refresh it after a run cancel.
+    Mutations: drop the `if:`; `always()` for `!cancelled()` -- each red."""
+    assert _summary_job_step(_GATE_REFRESH["name"]) == _GATE_REFRESH
 
 
 #: The cell summaries download step, hand-written.
@@ -219,11 +241,11 @@ _CELL_DOWNLOAD = {
 
 
 def test_the_cell_summaries_download_is_bounded_and_never_blocks_the_comment():
-    """`!cancelled()`: the comment posts after a failed gate refresh, and an implicit `success()`
-    would skip the download it reads. `continue-on-error`: for comment-ops the comment is the
-    feedback channel, so an artifact-API error must not skip it. `timeout-minutes` ends the 180 s
-    a retried download holds the job. `pattern:` mode succeeds on zero matches, where `name:`
-    throws.
+    """`!cancelled()`, the comment step's own condition, not the implicit `success()`: a step
+    later inserted before this one cannot silently skip the file the comment reads.
+    `continue-on-error`: for comment-ops the comment is the feedback channel, so an artifact-API
+    error must not skip it. `timeout-minutes` ends the 180 s a retried download holds the job.
+    `pattern:` mode succeeds on zero matches, where `name:` throws.
 
     Mutations: drop `!cancelled()`; drop `continue-on-error`; drop `timeout-minutes`; download
     by `name:`."""
@@ -455,6 +477,21 @@ def test_apply_passes_apply_summary_exactly_this_with():
     assert step["with"] == _APPLY_SUMMARY_WITH
 
 
+def test_the_comment_step_is_bounded_before_the_gate_refresh():
+    """`timeout-minutes` ends a hung comment as a failed step, so the `!cancelled()` gate refresh
+    after it still runs, with the rest of `ubuntu-slim`'s 15-minute job cap; the `with:` is
+    pinned above. Mutations: drop `timeout-minutes` -- red; `timeout-minutes: 10` -- red; drop
+    the `if:` -- red."""
+    step = _summary_job_step("Post apply result comment")
+    assert {k: v for k, v in step.items() if k != "with"} == {
+        "name": "Post apply result comment",
+        "id": "result",
+        "if": "${{ !cancelled() }}",
+        "timeout-minutes": 5,
+        "uses": "$/actions/apply-summary",
+    }
+
+
 #: The report download step, hand-written.
 _REPORT_DOWNLOAD = {
     "name": "Download the apply report",
@@ -470,8 +507,9 @@ def test_the_report_is_downloaded_by_exact_name_where_the_render_reads_it():
     """By the exact name detect output, not a `pattern`, to the directory the render step's
     `SHIPMATE_REPORT_PATH` names (pinned in `_RENDER_ENV`), and never with an empty name, which
     downloads every artifact of the run. A failed or timed-out download degrades: the render reads
-    the report as unread, renders the red line and never a green verdict. `!cancelled()` runs it
-    after a failed gate refresh, as the comment does.
+    the report as unread, renders the red line and never a green verdict. `!cancelled()`, not the
+    implicit `success()`: the comment that reads it posts even when the job is red, so a failed
+    earlier step must not skip the download.
 
     Mutations: name `${{ inputs.report-artifact }}`; drop the name clause from the `if:`; drop
     `!cancelled()`; download to another path; drop `continue-on-error`; drop

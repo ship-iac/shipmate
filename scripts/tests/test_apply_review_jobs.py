@@ -226,7 +226,7 @@ def test_the_review_job_checks_nothing_out():
 
 
 def test_the_review_mint_requests_only_pull_requests_read():
-    """`review`'s own `token` step, which `rd` reads with; the reply to waiting runs mints inside
+    """`review`'s own `token` step, which `rd` reads with; the `waiters` job's reply mints inside
     `actions/apply-waiters`. Mutation: widen it to `pull-requests: write` -- red."""
     mints = [s for s in _review()["steps"] if _MINT in str(s.get("uses") or "")]
     assert len(mints) == 1, f"expected exactly one App-token mint in review, got {len(mints)}"

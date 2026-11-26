@@ -82,8 +82,22 @@ jobs:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      # Display only: a failure or a hung API call here must not fail review, and a refused
-      # review tells no one.
+
+  # Display only: no job needs it, and neither `summary`'s `results` nor `run_cancelled` reads
+  # it. A refused review tells no one.
+  waiters:
+    needs: [review]
+    if: ${{ needs.review.result == 'success' }}
+    runs-on: ubuntu-slim
+    # Bounds a hung setup; it does not bound runner pickup or a lost runner.
+    timeout-minutes: 3
+    # A lost runner or a setup error fails this job, not the run.
+    continue-on-error: true
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      # The action verifies the App key itself. A failure or a hung API call here must not fail
+      # the job.
       - name: Tell the apply runs waiting behind this one
         uses: $/actions/apply-waiters
         continue-on-error: true
@@ -381,15 +395,9 @@ jobs:
     outputs:
       posted: ${{ steps.result.outputs.posted }}
     steps:
-      - name: Complete gate if every apply check is done
-        uses: $/actions/gate-refresh
-        with:
-          head-sha: ${{ inputs.ref }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Job steps, not composite ones, so `timeout-minutes` can end the run that
-      # actions/toolkit#2575 holds open for 180 s after a retried blob download. `!cancelled()`:
-      # the comment still posts after a failed gate refresh, and it reads these files.
+      # actions/toolkit#2575 holds open for 180 s after a retried blob download. `!cancelled()`: the
+      # comment reads these files and posts even when the job is red.
       - name: Download apply cell summaries
         id: download
         if: ${{ !cancelled() }}
@@ -416,10 +424,12 @@ jobs:
       - name: Warn on apply cell summaries download failure
         if: ${{ !cancelled() && steps.download.outcome == 'failure' }}
         run: echo "::warning::apply cell summaries download did not complete; the comment may render without per-cell detail"
-      # A failed gate refresh still posts the run's results; the job stays red.
+      # The gate refresh follows, so a hung comment must end as a failed step, not a cancelled job;
+      # 5 minutes leaves the untimed refresh the rest of the job's 15-minute `ubuntu-slim` cap.
       - name: Post apply result comment
         id: result
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         uses: $/actions/apply-summary
         with:
           pr-number: ${{ inputs.pr_number }}
@@ -435,6 +445,15 @@ jobs:
           refused-by-rule: ${{ needs.detect.outputs.refused_by_rule || needs.lock.outputs.refused_by_rule }}
           auto: ${{ inputs.auto }}
           results: ${{ join(needs.*.result, ',') }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # After the comment, so the developer reads the results first. `!cancelled()`: a failed
+      # comment step still refreshes the gate.
+      - name: Complete gate if every apply check is done
+        if: ${{ !cancelled() }}
+        uses: $/actions/gate-refresh
+        with:
+          head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Display only: nothing reads the check, so a failure here must not fail summary.

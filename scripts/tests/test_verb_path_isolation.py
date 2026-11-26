@@ -81,6 +81,7 @@ APPLY_JOBS = {
     APPLY: {"guard", "admit", "run", "outcome"},
     APPLY_RUN: {
         "review",
+        "waiters",
         "detect",
         "lock",
         "envlevel0",
@@ -270,19 +271,19 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
 
 
 def test_every_summary_step_runs_on_every_apply_dispatch():
-    """A gate refresh that finds a hold once every check is done, or hits an API error, fails
-    its step; the result comment and the run check's finish still run, and so do the downloads
-    and the warning the comment reads. Mutations: delete the comment step's `if:` (the default
-    `success()` skips it) -- red; delete the run check's finish step's `if:` -- red; drop
-    `!cancelled()` from a download or the warning -- red."""
+    """A failed result comment still refreshes the gate, and a gate refresh that finds a hold
+    once every check is done, or hits an API error, fails its step and the run check's finish
+    still runs. Mutations: delete the gate step's `if:` (the default `success()` skips it) --
+    red; delete the run check's finish step's `if:` -- red; drop `!cancelled()` from a download
+    or the warning -- red."""
     steps = _job(APPLY_RUN, "summary")["steps"]
     assert len(steps) == 6, f"summary no longer has exactly six steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
     assert conditions == [
-        None,
         "${{ !cancelled() }}",
         "${{ !cancelled() && needs.detect.outputs.report_artifact != '' }}",
         "${{ !cancelled() && steps.download.outcome == 'failure' }}",
+        "${{ !cancelled() }}",
         "${{ !cancelled() }}",
         "${{ always() && steps.result.outputs.posted == 'true' }}",
     ], (

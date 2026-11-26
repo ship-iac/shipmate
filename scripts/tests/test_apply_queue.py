@@ -698,7 +698,7 @@ def test_a_marker_for_a_longer_run_id_does_not_answer_its_prefix(gh):
     assert gh.posts == [_told(12)]
 
 
-def test_review_then_summary_tell_a_waiting_run_once(gh):
+def test_two_waiters_invocations_tell_a_waiting_run_once(gh):
     """Two invocations against comments that keep what was posted. Mutation: skip the marker
     read -- red (posted twice)."""
     gh.runs, gh.jobs = _waiting(40)
@@ -707,7 +707,7 @@ def test_review_then_summary_tell_a_waiting_run_once(gh):
     assert gh.posts == [_told(40)]
 
 
-def test_a_waiting_run_first_listed_by_summary_is_told_then(gh):
+def test_a_waiting_run_first_listed_by_a_later_invocation_is_told_then(gh):
     """Mutation: answer only on the first invocation (a module-level flag) -- red."""
     gh.waiters()
     gh.runs, gh.jobs = _waiting(60)
@@ -902,3 +902,21 @@ def test_a_call_whose_unflip_runs_after_every_level_ended_holds_the_group():
         _job("unflip", "in_progress"),
     ]
     assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)
+
+
+def test_a_call_whose_waiters_runs_after_every_job_ended_holds_the_group():
+    """`waiters` runs inside the call, so the run holds the group until it ends; once it
+    completed, nothing holds.
+
+    Mutation: `_unfinished` skips jobs whose name ends `/ waiters` -- red."""
+    ended = [
+        _rv("completed"),
+        _job("detect", "completed"),
+        _job("lock", "completed"),
+        _job("L0 / dev / app / apply", "completed"),
+        _job("summary", "completed"),
+    ]
+    running = [*ended, _job("waiters", "in_progress")]
+    assert (aq.idle(running), aq.holds(running)) == (False, True)
+    done = [*ended, _job("waiters", "completed")]
+    assert (aq.idle(done), aq.holds(done)) == (False, False)

@@ -363,8 +363,9 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map
-        # is the omission this pins.
-        downstream = {j for j in jobs if j not in (GUARD_JOB, "detect", "review")}
+        # is the omission this pins. `waiters` reads no `detect` output, and
+        # test_apply_waiters_wiring.py pins its `needs`.
+        downstream = {j for j in jobs if j not in (GUARD_JOB, "detect", "review", "waiters")}
         assert downstream == set(expected_by_job), (
             f"{name}: jobs downstream of detect are {sorted(downstream)}, but this "
             f"guard knows {sorted(expected_by_job)} -- add the new job's whole needs list"
