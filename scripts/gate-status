@@ -10,7 +10,7 @@
     gate-status end <sha> <description>          turn this run's publish hold `failure`
     gate-status refresh <sha>                    green the gate once every apply check is done
     gate-status deploy <sha> <detect> <results>  write the post-merge verdict over job results
-    gate-status checks <sha> <jq>                print one `jq` projection per line of check runs
+    gate-status checks <sha> <jq> [--counted]    print one `jq` projection per line of check runs
     gate-status moved <sha> <pr>                 print `<pr>`'s live head when it is not `<sha>`
     gate-status replan <sha> <pr>                print that live head when it needs a plan
     gate-status published <sha> <pr>             print the earlier run that published it on `<pr>`
@@ -42,7 +42,8 @@ read (exit 1); `post` re-runs it before each retry, so it can exit `NEWER` too. 
 serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
 on any host, and a malformed `<sha>` or a failed listing exits 1 unannotated, a failed listing
 with the command and gh's stderr after any retry notices: a caller that degrades prints its own
-warning, and a fail-closed caller prints its own `::error::`.
+warning, and a fail-closed caller prints its own `::error::`. `--counted` lists through
+`check_runs` counted: a failed or short listing then exits 1 with an `::error::` line.
 
 `moved` and `replan` read the pull request through `_shipmate.pr_head`. `replan` prints the
 live head when it is not `<sha>`, the pull request is open and not a draft, and no run of the
@@ -405,9 +406,9 @@ def _post(sha, state, description):
     post(sha, state, description, lambda: _refuse_newer(sha))
 
 
-def _checks(sha, jq):
+def _checks(sha, jq, counted=False):
     # Bytes, not `print`: a Windows text stdout re-encodes through the code page and writes CRLF.
-    sys.stdout.buffer.write(check_runs(_repo(), sha, jq, run=run).encode("utf-8"))
+    sys.stdout.buffer.write(check_runs(_repo(), sha, jq, run=run, counted=counted).encode("utf-8"))
 
 
 def _moved(sha, pr):
@@ -702,6 +703,9 @@ _COMMANDS = {
 
 def main(argv):
     cmd, *args = argv or [""]
+    handler = _COMMANDS.get(cmd, (0, None))[1]
+    if cmd == "checks" and args[-1:] == ["--counted"]:
+        args, handler = args[:-1], functools.partial(_checks, counted=True)
     if cmd not in _COMMANDS or len(args) != _COMMANDS[cmd][0] + 1:
         raise SystemExit(
             f"::error::usage: gate-status {'|'.join(_COMMANDS)} <sha> ... (got {argv})"
@@ -715,7 +719,7 @@ def main(argv):
     )
     if cmd in ("moved", "replan", "published") and not is_pr_number(args[1]):
         raise SystemExit(f"::error::<pr> must be a pull request number (got: {args[1]!r})")
-    _COMMANDS[cmd][1](*args)
+    handler(*args)
 
 
 if __name__ == "__main__":

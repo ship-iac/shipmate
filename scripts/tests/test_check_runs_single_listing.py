@@ -1,8 +1,8 @@
 """The commit check-runs listing has one implementation: `_shipmate.check_runs`.
 
 Threat model: an accidental second listing added to an action, workflow or script, which would
-bypass the `filter=all` and pagination that `test_shipmate.py` pins on `check_runs`. A hostile
-edit to the SHA-pinned, reviewed engine files is out of scope.
+bypass the `filter=all`, the pagination and the counted form that `test_shipmate.py` pins on
+`check_runs`. A hostile edit to the SHA-pinned, reviewed engine files is out of scope.
 
 Actions and workflows are read through their parsed steps' comment-stripped `run:` lines, so a
 `description:` or a shell comment naming the URL is not a listing. Scripts are read as text: the

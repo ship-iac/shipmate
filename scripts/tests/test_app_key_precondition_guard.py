@@ -182,11 +182,14 @@ _SNAPSHOT_SNAP = {
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "COUNTED": "${{ inputs.counted }}",
     },
     "run": (
         "set -euo pipefail\n"
+        "flag=()\n"
+        'if [ "$COUNTED" = true ]; then flag=(--counted); fi\n'
         'if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \\\n'
-        "  '.check_runs[]' > \"$RUNNER_TEMP/checks.jsonl\"; then\n"
+        '  \'.check_runs[]\' "${flag[@]}" > "$RUNNER_TEMP/checks.jsonl"; then\n'
         '  echo "::error::could not list the check runs on $HEAD_SHA; the step log names the'
         ' cause"\n'
         "  exit 1\n"
@@ -201,8 +204,9 @@ def test_snapshot_action_steps_are_the_key_check_the_snapshot_then_the_mint():
     snapshot before any wave applies, instead of `complete` failing after infrastructure
     changed. The mint's token is used by no step; minting is the authenticated preflight.
 
-    Mutations: delete the verify step; drop the mint step; restore the flip step; wire
-    `by_wave` to `steps.snap.outputs.snapshot`; add back a `snapshot` output.
+    Mutations: delete the verify step; drop the mint step; restore the flip step; pass
+    `--counted` whatever `COUNTED` holds; wire `by_wave` to `steps.snap.outputs.snapshot`; add
+    back a `snapshot` output.
     """
     doc = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")
     assert doc["runs"]["steps"] == [_call(_ACTION_WITH), _SNAPSHOT_SNAP, _SNAPSHOT_MINT]

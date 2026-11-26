@@ -13,6 +13,10 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  counted:
+    description: '"true" refuses a check-run listing that holds fewer rows than its total_count.'
+    required: false
+    default: "false"
 outputs:
   by_wave:
     description: JSON object mapping each wave key of `waves-json` to the pre-existing apply-check ids of that wave's cells; `{}` for an empty wave.
@@ -32,10 +36,13 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        COUNTED: ${{ inputs.counted }}
       run: |
         set -euo pipefail
+        flag=()
+        if [ "$COUNTED" = true ]; then flag=(--counted); fi
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
-          '.check_runs[]' > "$RUNNER_TEMP/checks.jsonl"; then
+          '.check_runs[]' "${flag[@]}" > "$RUNNER_TEMP/checks.jsonl"; then
           echo "::error::could not list the check runs on $HEAD_SHA; the step log names the cause"
           exit 1
         fi

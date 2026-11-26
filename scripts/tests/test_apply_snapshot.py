@@ -3,7 +3,7 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, load_script, run_with_gate_gh, step_by
+from _loader import ACTIONS, action_yaml, bash_only, load_script, run_with_gate_gh, step_by
 
 apply_snapshot = load_script("apply-snapshot")
 apply_complete = load_script("apply-complete")
@@ -222,22 +222,12 @@ def test_a_failed_listing_fails_the_snapshot_step(
 ):
     """An empty wave set needs no check, so the listing is the step's only way to fail; the
     `listed` case is the control. Mutations: delete the failed listing's `exit 1` -> `failed`
-    exits 0; delete its `::error::` line -> `failed` prints nothing on stdout."""
-    env = {
-        **os.environ,
-        "GH_TOKEN": "x",
-        "HEAD_SHA": _HEAD,
-        "SHIPMATE_WAVES_JSON": "{}",
-        "SHIPMATE_APP_ID": str(APP_ID),
-        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-snapshot"),
-        "GITHUB_REPOSITORY": "acme/demo",
-        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
-        "RUNNER_TEMP": str(tmp_path),
-    }
+    exits 0; delete its `::error::` line -> `failed` prints nothing on stdout; pass `--counted`
+    whatever `COUNTED` holds -> the counted page call is sent."""
     proc, calls = run_with_gate_gh(
         tmp_path,
         step_by("apply-snapshot", id="snap")["run"],
-        env,
+        _snap_env(tmp_path, "false"),
         sha=_HEAD,
         checks_rc=checks_rc,
         checks_jq=".check_runs[]",
@@ -252,6 +242,51 @@ def test_a_failed_listing_fails_the_snapshot_step(
             ".check_runs[]",
         ]
     ]
+
+
+@bash_only
+def test_counted_true_lists_through_the_counted_pages(tmp_path):
+    """The stub answers no page call, so the counted listing fails the step. Mutation: drop the
+    `flag=(--counted)` branch -> the `--paginate` listing is sent and the step passes."""
+    proc, calls = run_with_gate_gh(
+        tmp_path,
+        step_by("apply-snapshot", id="snap")["run"],
+        _snap_env(tmp_path, "true"),
+        sha=_HEAD,
+        checks_jq=".check_runs[]",
+    )
+    assert (proc.returncode, proc.stdout) == (1, _LISTING_FAILED), proc.stderr
+    assert calls[0] == [
+        "api",
+        f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100&page=1",
+    ]
+
+
+def test_counted_defaults_to_false():
+    """Mutation: default `counted` to `"true"` -> every caller that omits it lists counted."""
+    inputs = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")["inputs"]
+    assert inputs["counted"] == {
+        "description": (
+            '"true" refuses a check-run listing that holds fewer rows than its total_count.'
+        ),
+        "required": False,
+        "default": "false",
+    }
+
+
+def _snap_env(tmp_path, counted):
+    return {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "HEAD_SHA": _HEAD,
+        "SHIPMATE_WAVES_JSON": "{}",
+        "SHIPMATE_APP_ID": str(APP_ID),
+        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-snapshot"),
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        "RUNNER_TEMP": str(tmp_path),
+        "COUNTED": counted,
+    }
 
 
 _EIGHT_WAVES = {
