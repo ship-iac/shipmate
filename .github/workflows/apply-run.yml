@@ -45,7 +45,7 @@ jobs:
   review:
     # Deliberately unconditional -- no `if:`: reads the decision server-side for every form; for
     # the comment forms it closes the comment-to-dispatch TOCTOU (CONTRACT.md §Comment-ops). A
-    # hand-made dispatch never reaches decide(), so this job binds `ref` to the open PR's head.
+    # hand-made dispatch never reaches decide(), so this job and `detect` bind `ref` to the PR's head.
     runs-on: ubuntu-slim
     # Reaches the App key the same way `summary` does.
     environment: { name: shipmate-engine, deployment: false }
@@ -66,56 +66,11 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           permission-pull-requests: read
       - id: rd
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          OWNER: ${{ github.repository_owner }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          REF: ${{ inputs.ref }}
-        run: |
-          set -euo pipefail
-          # On a query error gh prints the raw body (`--jq` not applied). Only NOT_FOUND there
-          # writes `unbound`, so `outcome` replies to every other failed read. `read` collapses
-          # adjacent tabs, so every @tsv field is non-empty.
-          rc=0
-          # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
-          pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
-            -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-            --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv') || rc=$?
-          if [[ "$rc" -ne 0 && "$pr" == *'"type":"NOT_FOUND"'* ]]; then
-            echo "unbound=true" >> "$GITHUB_OUTPUT"
-            echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
-            exit 1
-          fi
-          if [[ "$rc" -ne 0 ]]; then
-            echo "::error::Could not read pull request #$PR_NUMBER (gh exited $rc); nothing applies. Comment \`shipmate apply\` on the pull request again."
-            exit 1
-          fi
-          if [[ -z "$pr" ]]; then
-            echo "unbound=true" >> "$GITHUB_OUTPUT"
-            echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
-            exit 1
-          fi
-          IFS=$'\t' read -r state draft cross head rd <<< "$pr"
-          if [[ "$state" != OPEN ]]; then
-            echo "unbound=true" >> "$GITHUB_OUTPUT"
-            echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
-            exit 1
-          fi
-          if [[ "$draft" != false ]]; then
-            echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
-            exit 1
-          fi
-          if [[ "$cross" != false ]]; then
-            echo "::error::Pull request #$PR_NUMBER comes from a fork; nothing applies."
-            exit 1
-          fi
-          if [[ "$head" != "$REF" ]]; then
-            echo "::error::Pull request #$PR_NUMBER head is $head, but this dispatch names $REF; nothing applies. Comment \`shipmate apply\` on the pull request."
-            exit 1
-          fi
-          # NONE: no review rule, or code-owner review owns no changed file.
-          echo "decision=$rd" >> "$GITHUB_OUTPUT"
+        uses: $/actions/apply-pr-read
+        with:
+          token: ${{ steps.token.outputs.token }}
+          pr-number: ${{ inputs.pr_number }}
+          ref: ${{ inputs.ref }}
       # Display only: nothing reads the check, so a failure here must not fail review.
       - name: Show the running apply on the pull request
         uses: $/actions/apply-run-check
@@ -138,11 +93,8 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   detect:
-    # A `review` that FAILS is caught by `!failure()`, so nothing applies and the run is visibly
-    # red. The explicit `if:` stays rather than reverting to GHA's default `success()`: both forms
-    # refuse a failed `review`, and this one says so.
-    needs: [review]
-    if: ${{ !failure() && !cancelled() }}
+    # No `needs`: it reads the pull request itself, beside `review`, and `lock` refuses unless
+    # both read the same decision. A failed `review` stops `lock` and the levels, not this job.
     runs-on: ${{ inputs.runs_on }}
     # It checks out the pull request's tree, so it restores and never saves.
     cache-mode: read
@@ -160,10 +112,11 @@ jobs:
       head_sha: ${{ steps.d.outputs.head_sha }}
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
-      refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
+      refusal: ${{ steps.pr.outputs.refusal || steps.setup.outputs.refusal || steps.d.outputs.refusal }}
       refused_by_rule: ${{ steps.d.outputs.refused_by_rule }}
       tools: ${{ steps.setup.outputs.tools }}
       report_artifact: ${{ steps.report.outputs.name }}
+      decision: ${{ steps.pr.outputs.decision }}
     steps:
       # Before any step that can refuse, so every refusal leaves a report for the result comment;
       # apply-detect overwrites it with the complete one. One artifact name per call and attempt,
@@ -178,6 +131,13 @@ jobs:
           token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
           echo "path=$path" >> "$GITHUB_OUTPUT"
           echo "name=apply-report-$GITHUB_RUN_ATTEMPT-$token" >> "$GITHUB_OUTPUT"
+      # Before the checkout: a fork, a draft or a moved head refuses before `ref` is checked out.
+      - id: pr
+        uses: $/actions/apply-pr-read
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr_number }}
+          ref: ${{ inputs.ref }}
       # Every form merges the base tip into the head to find the cells behind it, so it needs
       # both histories; blob:none fetches file contents on demand.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -196,9 +156,7 @@ jobs:
           head-sha: ${{ inputs.ref }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
-          # Passed through raw, never defaulted: an empty decision means the review signal never
-          # arrived, which fails every apply form.
-          review-decision: ${{ needs.review.outputs.decision }}
+          review-decision: ${{ steps.pr.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
           report-path: ${{ steps.report.outputs.path }}
       - name: Upload the apply report
@@ -225,9 +183,24 @@ jobs:
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     outputs:
-      refusal: ${{ steps.l.outputs.refusal }}
+      refusal: ${{ steps.match.outputs.refusal || steps.l.outputs.refusal }}
       refused_by_rule: ${{ steps.l.outputs.refused_by_rule }}
     steps:
+      # Before `lock-acquire`, so a decision that changed between the two reads locks nothing. The
+      # right side is quoted: a literal, case-sensitive compare.
+      - id: match
+        shell: bash
+        env:
+          REVIEW: ${{ needs.review.outputs.decision }}
+          DETECT: ${{ needs.detect.outputs.decision }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$REVIEW" || -z "$DETECT" || "$REVIEW" != "$DETECT" ]]; then
+            msg="the review decision changed while this run started (review read '$REVIEW', detect read '$DETECT'); comment \`shipmate apply\` on the pull request again"
+            echo "refusal=$msg" >> "$GITHUB_OUTPUT"
+            echo "::error::$msg"
+            exit 1
+          fi
       - id: l
         uses: $/actions/lock-acquire
         with:
@@ -244,9 +217,8 @@ jobs:
     # this `L<n>` name is load-bearing: renaming it strands apply checks pending. deploy.yml
     # repeats it.
     name: L0
-    # `review` is listed so its failure reaches `!failure()`: otherwise a failed one skips
-    # `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over
-    # `fromJSON('')`.
+    # `review` is listed so its failure reaches `!failure()`: `detect` runs beside it and can
+    # succeed after `review` failed.
     needs: [review, detect, lock]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml

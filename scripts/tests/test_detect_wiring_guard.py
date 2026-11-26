@@ -69,7 +69,7 @@ _DETECT_STEPS = {
             "head-sha": "${{ inputs.ref }}",
             "pr-number": "${{ inputs.pr_number }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-            "review-decision": "${{ needs.review.outputs.decision }}",
+            "review-decision": "${{ steps.pr.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
             "report-path": "${{ steps.report.outputs.path }}",
         },
@@ -100,10 +100,13 @@ _APPLY_DETECT_OUTPUTS = {
     "head_sha": "${{ steps.d.outputs.head_sha }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
-    "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
+    "refusal": (
+        "${{ steps.pr.outputs.refusal || steps.setup.outputs.refusal || steps.d.outputs.refusal }}"
+    ),
     "refused_by_rule": "${{ steps.d.outputs.refused_by_rule }}",
     "tools": "${{ steps.setup.outputs.tools }}",
     "report_artifact": "${{ steps.report.outputs.name }}",
+    "decision": "${{ steps.pr.outputs.decision }}",
 }
 
 #: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every env-level's
@@ -192,6 +195,7 @@ def test_the_detect_step_is_exactly_this_step(workflow, uses):
     Mutation: give `apply-run.yml`'s detect step an `if: ${{ inputs.environment != '' }}`.
     Mutation: delete `review-decision` from `apply-run.yml`'s detect step.
     Mutation: delete `pr-number` from `apply-run.yml`'s detect step.
+    Mutation: read `review-decision` from `needs.review.outputs.decision`.
     Mutation: delete `auto` from `apply-run.yml`'s detect step; an unwired composite input is
     silently ignored."""
     doc = workflow_yaml(workflow)
@@ -235,7 +239,9 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     delete `base_sha`; drop `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal
     reaches the comment and the gate as the generic text; delete `tools`, so every wave cell
     refuses; read `refused_by_rule` as `steps.setup.outputs.refused_by_rule ||
-    steps.d.outputs.refused_by_rule`, so a setup failure could read as a rule refusal."""
+    steps.d.outputs.refused_by_rule`, so a setup failure could read as a rule refusal; drop
+    `steps.pr.outputs.refusal ||` from `refusal`; delete `decision`, so `lock` refuses every
+    run."""
     assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -379,3 +385,13 @@ def test_the_detect_job_seeds_its_report_first_and_uploads_it_last():
     `retention-days`."""
     steps = workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"]
     assert (steps[0], steps[-1]) == (_REPORT_SEED, _REPORT_UPLOAD)
+
+
+def test_detect_reads_the_pull_request_before_it_checks_anything_out():
+    """The checkout of `ref` follows the read that refuses a fork, a draft or a moved head, and
+    the report comes first so that refusal leaves one.
+
+    Mutation: move `pr` after the checkout."""
+    steps = workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"]
+    got = [s.get("id") or s["uses"].split("@")[0] for s in steps]
+    assert got == ["report", "pr", "actions/checkout", "setup", "d", "actions/upload-artifact"]

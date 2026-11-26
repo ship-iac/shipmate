@@ -127,23 +127,22 @@ GUARD_STEPS = {
 #: The guard job's steps after `GUARD_STEPS`, as `(if, run)`. Unlock's is the started reaction,
 #: a `uses:` step that `test_claim_wiring.py` pins whole.
 GUARD_TAIL = {"apply.yml": [(None, CANONICAL_PR_NUMBER_RUN)], "unlock.yml": [(None, None)]}
-#: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
-#: the `review` job that reads the pull request's review decision server-side; it runs in
-#: `apply-run.yml`, which only `apply.yml`'s `run` starts, after `guard` succeeded. `unlock.yml`
-#: carries no such job, because an approval reviews a diff and unlock applies none. Compared
-#: whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
+#: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path's `detect`
+#: reads the pull request's review decision itself, beside `review`, and `lock` needs both; it
+#: runs in `apply-run.yml`, which only `apply.yml`'s `run` starts, after `guard` succeeded.
+#: Compared whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
 DETECT_NEEDS = {
-    "apply-run.yml": ["review"],
+    "apply-run.yml": [],
     "unlock.yml": ["guard"],
 }
 #: The whole `needs:` list of every job downstream of `detect`, per file. Every job that can fail
-#: before `detect` has to appear, or its failure never reaches this job's `!failure()`: `detect`
-#: is skipped, its outputs read as empty strings, the `!= 'true'` clause reads empty as
-#: "not empty", and the job fans out on `fromJSON('')`. `summary` is in the map for the other
-#: half of the same property, its `results:` being `join(needs.*.result, ',')` over its own
-#: needs, so an omitted pre-`detect` job renders the non-failure comment over a run that died.
-#: Compared whole, per job, so neither a pre-`detect` job dropping out nor a new one being
-#: omitted passes unnoticed.
+#: before or beside `detect` has to appear, or its failure never reaches this job's `!failure()`.
+#: In `unlock.yml` a failed `guard` leaves `detect` skipped, its outputs read as empty strings,
+#: the `!= 'true'` clause reads empty as "not empty", and the job fans out on `fromJSON('')`.
+#: `summary` is in the map for the other half of the same property, its `results:` being
+#: `join(needs.*.result, ',')` over its own needs, so an omitted job renders the non-failure
+#: comment over a run that died. Compared whole, per job, so neither such a job dropping out nor
+#: a new one being omitted passes unnoticed.
 DOWNSTREAM_NEEDS = {
     "apply-run.yml": {
         "lock": ["review", "detect"],
@@ -228,7 +227,8 @@ def test_every_fan_out_job_carries_the_guard_in_its_needs():
     clause. In `apply.yml` every apply job sits behind `run`, which needs `guard`; `apply-run.yml`
     holds no `guard`, so its jobs' needs are pinned by `DOWNSTREAM_NEEDS` instead.
 
-    Mutation: drop `guard` from `apply.yml`'s `run` `needs:` -- red."""
+    Mutations: drop `guard` from `apply.yml`'s `run` `needs:` -- red; add `needs: [review]` to
+    `apply-run.yml`'s `detect` -- red."""
     for name, expected in DETECT_NEEDS.items():
         got = _needs(workflow_jobs(name)["detect"])
         assert got == expected, f"{name}: detect must need exactly {expected!r}, got {got!r}"
@@ -259,7 +259,8 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     """`DOWNSTREAM_NEEDS`, whole list per job, also pins the env-level order: each level needs
     every level before it, so a bare apply runs them in `needs` order.
 
-    Mutation: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red."""
+    Mutations: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red; drop
+    `review` from `lock`'s -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map

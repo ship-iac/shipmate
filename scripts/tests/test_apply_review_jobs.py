@@ -1,19 +1,22 @@
-"""Guards `apply-run.yml`'s `review` job and its wiring into `detect`.
+"""Guards `actions/apply-pr-read` and its two call sites, `apply-run.yml`'s `review` and `detect`.
 
-The job re-reads the pull request's `reviewDecision` server-side, on every apply form, so the
+The action re-reads the pull request's `reviewDecision` server-side, on every apply form, so the
 apply decision rests on GitHub's answer rather than on a dispatch input, and it refuses unless
 the dispatch's `ref` is the head of an open, non-draft, same-repository pull request: a writer's
-hand-made dispatch pairing an approved number with another head never reaches decide(). The
-step's shell body is executed against a `gh` stub for each refusal. Threat model is
-accidental regression -- a line reverted in a refactor, a flag dropped, an `if:` re-introduced --
-not a hostile edit to a SHA-pinned engine file. Two regressions are pinned whole
-here, and a third in `test_apply_dispatch_actor_guard.py`:
+hand-made dispatch pairing an approved number with another head never reaches decide(). `review`
+reads with its App token and `detect` with its job token, beside each other; `lock` refuses
+unless both read the same decision (`test_apply_lock_wiring.py`). The action's shell body is
+executed against a `gh` stub for each refusal. Threat model is accidental regression -- a line
+reverted in a refactor, a flag dropped, an `if:` re-introduced, a step moved -- not a hostile
+edit to a SHA-pinned engine file. Pinned whole here, and in `test_apply_dispatch_actor_guard.py`:
 
 - an `if:` re-appearing on the `review` job. A conditional review job can be skipped, and a
   skipped job delivers an empty decision, which every apply form fails on
   (`refuse_undetermined`). Absence is the property, so the job mapping is compared whole
   rather than the absence assumed.
-- `detect`'s needs list losing `review`: the decision then never arrives at all.
+- `detect` gaining `needs` or an `if:`: it would wait for `review` again.
+- either call site reading with another token, pull request or ref, or `detect` checking out
+  before its read accepted the pull request.
 - `review` missing from `summary`'s `needs`. That is pinned as one whole-list-per-job map in
   `test_apply_dispatch_actor_guard.py` rather than a second time here, because `results:` is
   `join(needs.*.result, ',')` over that same list.
@@ -28,15 +31,18 @@ import re
 import shutil
 
 import pytest
-from _loader import ENGINE, ENGINE_ENVIRONMENT, bash_only, run_step, step_by, workflow_jobs
+from _loader import (
+    ENGINE,
+    ENGINE_ENVIRONMENT,
+    action_yaml,
+    bash_only,
+    run_step,
+    step_by,
+    workflow_jobs,
+)
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
-
-#: The whole `if:` expression `apply-run.yml`'s `detect` carries, hand-written.
-#: A failed `review` must skip it; nothing else may.
-_DETECT_IF = "${{ !failure() && !cancelled() }}"
-_DETECT_NEEDS = ["review"]
 
 #: The whole `review` job minus its steps, hand-written. No `if:` is part of the value, and the
 #: App key reaches the job only through `shipmate-engine`, whose branch policy admits the default
@@ -51,22 +57,28 @@ _REVIEW_JOB = {
     },
 }
 
-#: The whole `rd` step, its `run` with comment lines stripped, hand-written. The `--jq` program
+#: The action's one step, its `run` with comment lines stripped, hand-written. The `--jq` program
 #: and the refusals are the entire mapping from the GraphQL response to the decision `detect`
 #: partitions on, and to whether `ref` is the open, same-repository pull request's own head.
 _RD_STEP = {
     "id": "rd",
     "shell": "bash",
     "env": {
-        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "GH_TOKEN": "${{ inputs.token }}",
         "OWNER": "${{ github.repository_owner }}",
-        "PR_NUMBER": "${{ inputs.pr_number }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
         "REF": "${{ inputs.ref }}",
     },
     "run": "".join(
         line + "\n"
         for line in (
             "set -euo pipefail",
+            "refuse() {",
+            "  local msg=\"${1//[$'\\r\\n']/ }\"",
+            '  echo "refusal=$msg" >> "$GITHUB_OUTPUT"',
+            '  echo "::error::$msg"',
+            "  exit 1",
+            "}",
             "rc=0",
             (
                 "pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!)"
@@ -81,52 +93,45 @@ _RD_STEP = {
             'if [[ "$rc" -ne 0 && "$pr" == *\'"type":"NOT_FOUND"\'* ]]; then',
             '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
-                '  echo "::error::Pull request #$PR_NUMBER does not exist in this repository; '
+                '  refuse "Pull request #$PR_NUMBER does not exist in this repository; '
                 'nothing applies."'
             ),
-            "  exit 1",
             "fi",
             'if [[ "$rc" -ne 0 ]]; then',
             (
-                '  echo "::error::Could not read pull request #$PR_NUMBER (gh exited $rc); '
+                '  refuse "Could not read pull request #$PR_NUMBER (gh exited $rc); '
                 'nothing applies. Comment \\`shipmate apply\\` on the pull request again."'
             ),
-            "  exit 1",
             "fi",
             'if [[ -z "$pr" ]]; then',
             '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
-                '  echo "::error::Pull request #$PR_NUMBER does not exist in this repository; '
+                '  refuse "Pull request #$PR_NUMBER does not exist in this repository; '
                 'nothing applies."'
             ),
-            "  exit 1",
             "fi",
             "IFS=$'\\t' read -r state draft cross head rd <<< \"$pr\"",
             'if [[ "$state" != OPEN ]]; then',
             '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
-                '  echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. '
+                '  refuse "Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. '
                 "A merged pull request's plans apply through the merge deploy.\""
             ),
-            "  exit 1",
             "fi",
             'if [[ "$draft" != false ]]; then',
             (
-                '  echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. '
+                '  refuse "Pull request #$PR_NUMBER is a draft; nothing applies. '
                 'Mark it ready for review first."'
             ),
-            "  exit 1",
             "fi",
             'if [[ "$cross" != false ]]; then',
-            '  echo "::error::Pull request #$PR_NUMBER comes from a fork; nothing applies."',
-            "  exit 1",
+            '  refuse "Pull request #$PR_NUMBER comes from a fork; nothing applies."',
             "fi",
             'if [[ "$head" != "$REF" ]]; then',
             (
-                '  echo "::error::Pull request #$PR_NUMBER head is $head, but this dispatch names '
+                '  refuse "Pull request #$PR_NUMBER head is $head, but this dispatch names '
                 '$REF; nothing applies. Comment \\`shipmate apply\\` on the pull request."'
             ),
-            "  exit 1",
             "fi",
             'echo "decision=$rd" >> "$GITHUB_OUTPUT"',
         )
@@ -143,7 +148,32 @@ def _review():
 
 
 def _rd():
-    return next(s for s in _review()["steps"] if s.get("id") == "rd")
+    (step,) = action_yaml("apply-pr-read")["runs"]["steps"]
+    return step
+
+
+#: Each call site of the action, whole, by job: `review` reads with its App token, `detect` with
+#: its job token, both the dispatch's own pull request and ref.
+_READ_SITES = {
+    "review": {
+        "id": "rd",
+        "uses": "$/actions/apply-pr-read",
+        "with": {
+            "token": "${{ steps.token.outputs.token }}",
+            "pr-number": "${{ inputs.pr_number }}",
+            "ref": "${{ inputs.ref }}",
+        },
+    },
+    "detect": {
+        "id": "pr",
+        "uses": "$/actions/apply-pr-read",
+        "with": {
+            "token": "${{ github.token }}",
+            "pr-number": "${{ inputs.pr_number }}",
+            "ref": "${{ inputs.ref }}",
+        },
+    },
+}
 
 
 def test_the_review_job_is_this_whole_mapping():
@@ -175,17 +205,20 @@ def test_the_review_mint_requests_only_pull_requests_read():
     assert got == _MINT_PERMISSIONS
 
 
-def test_detect_needs_review_and_refuses_to_run_after_it_failed():
-    """One property, two halves: without `review` in `needs` the decision never
-    arrives, and the explicit `if:` is what keeps a FAILED `review` from being
-    read as anything but a dead run.
+def test_detect_runs_beside_review():
+    """`detect` reads the decision itself, so it waits on no job; `lock` needs both and compares
+    their reads.
 
-    Mutation: set detect's `if:` to `${{ always() }}`."""
+    Mutations: add `needs: [review]` to `detect`; add `if: ${{ always() }}` to it."""
     detect = workflow_jobs("apply-run.yml")["detect"]
-    assert detect.get("needs") == _DETECT_NEEDS
-    # `.get`, not `[...]`: a deleted `if:` is a fail-open mutation, and a KeyError would red
-    # without naming the expression that went missing.
-    assert detect.get("if") == _DETECT_IF
+    assert (detect.get("needs"), detect.get("if")) == (None, None)
+
+
+@pytest.mark.parametrize("job", sorted(_READ_SITES))
+def test_each_job_reads_the_pull_request_through_the_one_action(job):
+    """Mutation: `detect` passes `token: ${{ steps.token.outputs.token }}`."""
+    steps = [s for s in workflow_jobs("apply-run.yml")[job]["steps"] if "apply-pr-read" in str(s)]
+    assert steps == [_READ_SITES[job]]
 
 
 def test_the_apply_detect_action_feeds_every_shipmate_env_var_the_script_reads():
@@ -219,7 +252,7 @@ def test_the_rd_step_is_this_whole_step():
     """Compared whole, so the query cannot read another pull request and the refusals cannot be
     reordered or reworded unseen; the tests below execute the same text.
 
-    Mutations: `-F pr="$PR_NUMBER"` to `-F pr=1`; delete `REF` from `env`."""
+    Mutations: `-F pr="$PR_NUMBER"` to `-F pr=1` in the action; delete `REF` from `env`."""
     step = _rd()
     run = "".join(ln + "\n" for ln in step["run"].splitlines() if not ln.lstrip().startswith("#"))
     assert {**step, "run": run} == _RD_STEP
@@ -256,8 +289,8 @@ exit 1
 """
 
 
-def _run_rd(tmp_path, pull_request, gh=_JQ_GH):
-    """Run the shipped `rd` body for PR 7 at ref `_HEAD`; return (exit code, stdout, outputs)."""
+def _run_rd(tmp_path, pull_request, gh=_JQ_GH, ref=_HEAD):
+    """Run the action's body for PR 7 at `ref`; return (exit code, stdout, outputs)."""
     (tmp_path / "gh").write_text(gh, encoding="utf-8", newline="\n")
     (tmp_path / "gh").chmod(0o755)
     out_file = tmp_path / "github_output"
@@ -271,7 +304,7 @@ def _run_rd(tmp_path, pull_request, gh=_JQ_GH):
         "GITHUB_REPOSITORY": "org/repo",
         "OWNER": "org",
         "PR_NUMBER": "7",
-        "REF": _HEAD,
+        "REF": ref,
     }
     proc = run_step(tmp_path, _rd()["run"], env)
     return proc.returncode, proc.stdout, out_file.read_text(encoding="utf-8")
@@ -288,12 +321,14 @@ def test_a_pull_request_github_cannot_find_refuses_unbound(tmp_path):
     pull request.
 
     Mutations: drop the NOT_FOUND branch -> the failed-read refusal, no `unbound`; drop its
-    `unbound=true` write."""
-    assert _run_rd(tmp_path, None, gh=_NOT_FOUND_GH) == (
-        1,
-        "::error::Pull request #7 does not exist in this repository; nothing applies.\n",
-        "unbound=true\n",
-    )
+    `unbound=true` write; its `refuse` call echoes the `::error::` line and exits without
+    writing `refusal=`."""
+    assert _run_rd(tmp_path, None, gh=_NOT_FOUND_GH) == (1, f"::error::{_MISSING}\n", _UNBOUND)
+
+
+_MISSING = "Pull request #7 does not exist in this repository; nothing applies."
+#: The outputs of a refusal naming no pull request: `unbound`, then the refusal.
+_UNBOUND = f"unbound=true\nrefusal={_MISSING}\n"
 
 
 #: A failed read that is not NOT_FOUND: gh's text for a 502, exit 1.
@@ -309,14 +344,16 @@ def test_a_failed_read_refuses_without_unbound(tmp_path):
     """A transient failure names no missing pull request, so `outcome` still replies.
 
     Mutations: write `unbound=true` on every failed read; drop the failed-read branch -> the
-    empty output reaches the null-pull-request refusal, which writes `unbound`."""
+    empty output reaches the null-pull-request refusal, which writes `unbound`; its `refuse`
+    call echoes the `::error::` line and exits without writing `refusal=`."""
+    said = (
+        "Could not read pull request #7 (gh exited 1); nothing applies. Comment "
+        "`shipmate apply` on the pull request again."
+    )
     assert _run_rd(tmp_path, None, gh=_BAD_GATEWAY_GH) == (
         1,
-        (
-            "::error::Could not read pull request #7 (gh exited 1); nothing applies. Comment "
-            "`shipmate apply` on the pull request again.\n"
-        ),
-        "",
+        f"::error::{said}\n",
+        f"refusal={said}\n",
     )
 
 
@@ -329,11 +366,7 @@ def test_a_bare_null_pull_request_refuses(tmp_path):
     Mutation: replace the `-z "$pr"` branch's `echo ...; exit 1` with
     `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`; drop its `unbound=true` write
     (`outcome` would reply on a number naming no pull request)."""
-    assert _run_rd(tmp_path, None) == (
-        1,
-        "::error::Pull request #7 does not exist in this repository; nothing applies.\n",
-        "unbound=true\n",
-    )
+    assert _run_rd(tmp_path, None) == (1, f"::error::{_MISSING}\n", _UNBOUND)
 
 
 @bash_only
@@ -345,13 +378,14 @@ def test_a_pull_request_that_is_not_open_refuses(tmp_path, state):
     Writes `unbound`, so `outcome` posts no reply for it.
 
     Mutations: delete the `"$state" != OPEN` check; drop its `unbound=true` write."""
+    said = (
+        f"Pull request #7 is {state}, not OPEN; nothing applies. A merged pull "
+        "request's plans apply through the merge deploy."
+    )
     assert _run_rd(tmp_path, {**_OPEN, "state": state}) == (
         1,
-        (
-            f"::error::Pull request #7 is {state}, not OPEN; nothing applies. A merged pull "
-            "request's plans apply through the merge deploy.\n"
-        ),
-        "unbound=true\n",
+        f"::error::{said}\n",
+        f"unbound=true\nrefusal={said}\n",
     )
 
 
@@ -361,10 +395,11 @@ def test_a_draft_pull_request_refuses(tmp_path):
     """decide() refuses a draft at comment time; a hand-made dispatch skips decide().
 
     Mutation: delete the `"$draft" != false` check."""
+    said = "Pull request #7 is a draft; nothing applies. Mark it ready for review first."
     assert _run_rd(tmp_path, {**_OPEN, "isDraft": True}) == (
         1,
-        "::error::Pull request #7 is a draft; nothing applies. Mark it ready for review first.\n",
-        "",
+        f"::error::{said}\n",
+        f"refusal={said}\n",
     )
 
 
@@ -372,10 +407,11 @@ def test_a_draft_pull_request_refuses(tmp_path):
 @_needs_jq
 def test_a_fork_pull_request_refuses(tmp_path):
     """Mutation: delete the `"$cross" != false` check."""
+    said = "Pull request #7 comes from a fork; nothing applies."
     assert _run_rd(tmp_path, {**_OPEN, "isCrossRepository": True}) == (
         1,
-        "::error::Pull request #7 comes from a fork; nothing applies.\n",
-        "",
+        f"::error::{said}\n",
+        f"refusal={said}\n",
     )
 
 
@@ -388,14 +424,30 @@ def test_a_head_differing_in_the_last_character_refuses(tmp_path):
     Mutation: compare `"${head:0:39}" != "${REF:0:39}"` (a prefix on both sides, so the
     matching-head tests stay green)."""
     other = _HEAD[:-1] + "8"
+    said = (
+        f"Pull request #7 head is {other}, but this dispatch names {_HEAD}; "
+        "nothing applies. Comment `shipmate apply` on the pull request."
+    )
     assert _run_rd(tmp_path, {**_OPEN, "headRefOid": other}) == (
         1,
-        (
-            f"::error::Pull request #7 head is {other}, but this dispatch names {_HEAD}; "
-            "nothing applies. Comment `shipmate apply` on the pull request.\n"
-        ),
-        "",
+        f"::error::{said}\n",
+        f"refusal={said}\n",
     )
+
+
+@bash_only
+@_needs_jq
+def test_a_ref_carrying_newlines_writes_one_refusal_line(tmp_path):
+    """The dispatcher supplies `ref`, and the head-mismatch refusal names it: a newline written
+    through would forge a `decision` and an `unbound` line in the job that holds the App key.
+
+    Mutation: write the raw message (`echo "refusal=$1"`)."""
+    forged = f"{_HEAD}\ndecision=APPROVED\r\nunbound=true"
+    said = (
+        f"Pull request #7 head is {_HEAD}, but this dispatch names {_HEAD} decision=APPROVED  "
+        "unbound=true; nothing applies. Comment `shipmate apply` on the pull request."
+    )
+    assert _run_rd(tmp_path, _OPEN, ref=forged) == (1, f"::error::{said}\n", f"refusal={said}\n")
 
 
 @bash_only

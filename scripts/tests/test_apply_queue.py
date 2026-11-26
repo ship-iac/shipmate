@@ -872,3 +872,19 @@ def test_a_malformed_pr_number_refuses_before_any_read(gh, monkeypatch):
         gh.go()
     assert exc.value.code == "::error::PR_NUMBER must be a pull request number (got: '012')"
     assert (gh.job_reads, gh.cancels, gh.posts) == ([], [], [])
+
+
+def test_a_call_whose_review_and_detect_both_wait_for_the_group_holds_nothing():
+    """`detect` runs beside `review`, so a call waiting for the group lists both `pending`.
+
+    Mutation: drop the `_in_group_wait` branch of `idle` -- red."""
+    jobs = [_rv("pending"), _job("detect", "pending")]
+    assert (aq.idle(jobs), aq.holds(jobs)) == (True, False)
+
+
+def test_a_call_whose_detect_is_pending_after_review_ended_holds_the_group():
+    """`review` started, so the call is past the group; a `pending` `detect` waits for a runner.
+
+    Mutation: `_in_group_wait` reads any in-call job `pending` -- red."""
+    jobs = [_rv("completed"), _job("detect", "pending")]
+    assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)
