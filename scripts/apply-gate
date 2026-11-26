@@ -57,6 +57,8 @@ DONE_CONCLUSIONS = {"success", "neutral"}
 #: check, whose failure makes `apply-cell` refuse before it applies, and the step running it.
 PRE_APPLY_STEP = "Pre-apply check"
 APPLY_STEP = "Apply the cell"
+#: The `save` job's step that saves the cell's state, as `cell.yml` names it (`state_safe`).
+STATE_STEP = "Save the cell's state"
 #: The title of an apply check held `in_progress` because its cell's state may not be saved.
 HELD_TITLE = "State not saved"
 
@@ -165,13 +167,28 @@ def _applied(row):
     return not (conclusion(APPLY_STEP) == "skipped" or conclusion(PRE_APPLY_STEP) == "failure")
 
 
+def state_safe(save_row):
+    """Whether the `save` row `save_row` saved its cell's state: the job succeeded, or its step
+    named exactly `STATE_STEP` succeeded, so a later step failing in the same job (the check
+    write) leaves the state safe. A row listing no steps (a lost runner) is safe only by its
+    job conclusion."""
+    if save_row.get("conclusion") == "success":
+        return True
+    steps = save_row.get("steps")
+    return isinstance(steps, list) and any(
+        isinstance(s, dict) and s.get("name") == STATE_STEP and s.get("conclusion") == "success"
+        for s in steps
+    )
+
+
 def attempts(jobs, stack, env):
     """`{attempt: {"applied": ..., "saved": ...}}` for the cell's rows in `jobs`, a
     `filter=all` listing. `applied` is the verdict (`_applied`) of the attempt's `apply` rows
     that are no carried copy (`is_carried`): True when any applied, None when the attempt lists
     no `apply` row or any is unknown, False when every row is carried or did not apply. `saved`
-    is True when a `save` row of the attempt or a later one succeeded: a later save succeeds only
-    after the earlier attempts' state was found. None when no such row is listed, else False."""
+    is True when a `save` row of the attempt or a later one saved its state (`state_safe`): a
+    later save succeeds only after the earlier attempts' state was found. None when no such row
+    is listed, else False."""
     rows = {}
     for job in jobs:
         part = cell_part(job.get("name", ""), stack, env)
@@ -183,7 +200,7 @@ def attempts(jobs, stack, env):
         verdicts = [_applied(row) for row in listed if not is_carried(row, jobs)]
         applied = True if True in verdicts else None if None in verdicts or not listed else False
         saves = [j for k in rows if k >= attempt for j in rows[k]["save"]]
-        saved = any(j.get("conclusion") == "success" for j in saves) if saves else None
+        saved = any(state_safe(j) for j in saves) if saves else None
         out[attempt] = {"applied": applied, "saved": saved}
     return out
 

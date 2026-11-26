@@ -26,13 +26,13 @@ Per cell, in this order:
    parse. This covers a re-run whose own rows read refused after an unsaved attempt.
 3. Otherwise:
 
-| `apply` row | `save` row | Write (`plan`) |
+| `apply` row | `save` row's state (`apply-gate.state_safe`) | Write (`plan`) |
 | --- | --- | --- |
-| `success` | `success` | `completed`/`success`, the `apply` job's URL, the record title |
-| `failure` | `success` | `queued`, `Failed: <first error line>` of the `apply` job |
-| `cancelled` | `success` | `queued`, `Cancelled` |
-| other conclusion | `success` | `queued`, `Not applied (<conclusion>)`: never `success` |
-| any, never applied | not `success` | `queued`, `Failed: <first error line>` of the `save` job |
+| `success` | safe | `completed`/`success`, the `apply` job's URL, the record title |
+| `failure` | safe | `queued`, `Failed: <first error line>` of the `apply` job |
+| `cancelled` | safe | `queued`, `Cancelled` |
+| other conclusion | safe | `queued`, `Not applied (<conclusion>)`: never `success` |
+| any, never applied | not safe | `queued`, `Failed: <first error line>` of the `save` job |
 | `cancelled`, no steps | none | `queued`, `Cancelled` (cancelled while pending) |
 | none | none | `queued`, `Not run` when the wave did not run, else unresolved |
 
@@ -119,7 +119,7 @@ def _decide(check, ids, own, jobs, not_run):
         return {**_row(check, ids), "held": True}
     if not applies:
         return _row(check, ids) if not_run else None
-    if pending_cancel or saves[-1].get("conclusion") == "success":
+    if pending_cancel or ag.state_safe(saves[-1]):
         return _row(check, ids, applies[-1])
     # Not held, so this attempt did not apply: the save itself failed.
     return _row(check, ids, {**saves[-1], "conclusion": "failure"})
