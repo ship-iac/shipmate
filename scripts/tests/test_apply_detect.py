@@ -2101,12 +2101,13 @@ def test_each_wait_gets_its_own_short_relists(monkeypatch, tmp_path):
 @pytest.mark.parametrize("complete", ["failed", "short"])
 def test_a_listing_incomplete_until_the_deadline_fails(monkeypatch, tmp_path, complete):
     """A failed read, or a page whose `total_count` exceeds its runs, on every poll: five
-    `PLAN_RELIST` sleeps, then `PLAN_POLL` ones to the deadline, 495 seconds in all. Mutations:
-    treat `complete` false as an empty listing (the cell applies); pass `counted=False` (short
-    applies); settle on an incomplete, empty listing (the cell applies)."""
+    `PLAN_RELIST` sleeps, then `PLAN_POLL` ones cut to the deadline, 480 seconds in all.
+    Mutations: treat `complete` false as an empty listing (the cell applies); pass
+    `counted=False` (short applies); settle on an incomplete, empty listing (the cell applies);
+    drop the deadline cap on the sleep (sixteen 30s, 495 seconds)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], complete)])
     assert _refused(out) == f"refusal={_UNLISTED}\n"
-    assert clock.sleeps == [3] * 5 + [30] * 16
+    assert clock.sleeps == [3] * 5 + [30] * 15 + [15]
 
 
 def test_a_listing_incomplete_after_a_live_one_fails_at_the_deadline(monkeypatch, tmp_path):

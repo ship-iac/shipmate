@@ -97,9 +97,9 @@ _sleep = time.sleep
 #: p90 141 s; longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
 PLAN_WAIT = 480
 PLAN_POLL = 30
-#: Probed: an apply run's status change makes a counted listing advertise a run it does not
-#: return for one read, and the read 3 s later was consistent, so `PLAN_RELIST` re-lists past it;
-#: `PLAN_RELISTS` bounds the extra listings per wait.
+#: Probed on one apply run, 35 reads about 3 s apart (2026-11-26): its status changes made a counted
+#: listing advertise a run it did not return, each for one read, so `PLAN_RELIST` re-lists past
+#: it; `PLAN_RELISTS` bounds the extra listings per wait.
 PLAN_RELIST = 3
 PLAN_RELISTS = 5
 #: Seconds a wait that waited on a run sleeps before the checks are read: a check-run listing can
@@ -595,7 +595,10 @@ def wait_for_plans(repo, pr_number):
     `_clock` have passed since the first, then refuses (`_wait_refusal`). A poll whose listing is
     incomplete and that found no run live and none unread sleeps `PLAN_RELIST` seconds instead,
     for the first `PLAN_RELISTS` such polls of this call; a poll with a live or unread run spends
-    none of them. The deadline is checked between polls: a read that stalls is not bounded by it."""
+    none of them. Any incomplete listing qualifies, by design: a count mismatch, a failed or
+    malformed page, or a listing past its page cap. No sleep runs past the deadline, so the last
+    poll falls at it. The deadline is checked between polls: a read that stalls is not bounded
+    by it."""
     deadline = _clock() + PLAN_WAIT
     waited = set()
     relists = 0
@@ -607,11 +610,11 @@ def wait_for_plans(repo, pr_number):
             return waited
         if _clock() >= deadline:
             raise _wait_refusal(pr_number, complete, live, unread)
+        interval = PLAN_POLL
         if not complete and not live and not unread and relists < PLAN_RELISTS:
             relists += 1
-            sleep(PLAN_RELIST)
-        else:
-            sleep(PLAN_POLL)
+            interval = PLAN_RELIST
+        sleep(min(interval, max(0, deadline - _clock())))
 
 
 def _poll_plans(repo, pr_number, waited):
