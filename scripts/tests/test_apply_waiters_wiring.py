@@ -33,6 +33,7 @@ WAITERS_JOB = {
     "if": "${{ needs.review.result == 'success' }}",
     "runs-on": "ubuntu-slim",
     "timeout-minutes": 3,
+    "continue-on-error": True,
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
 }
@@ -80,7 +81,7 @@ def test_the_waiters_job_steps_are_whole():
 
 def test_the_waiters_job_is_this_whole_mapping():
     """Mutations: `if: ${{ always() }}` -- red; `permissions: { pull-requests: write }` --
-    red; drop `timeout-minutes` -- red."""
+    red; drop `timeout-minutes` -- red; drop `continue-on-error` -- red."""
     job = workflow_jobs("apply-run.yml")["waiters"]
     assert {k: v for k, v in job.items() if k != "steps"} == WAITERS_JOB
 

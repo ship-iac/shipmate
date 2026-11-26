@@ -91,6 +91,8 @@ jobs:
     runs-on: ubuntu-slim
     # Bounds a hung setup; it does not bound runner pickup or a lost runner.
     timeout-minutes: 3
+    # A lost runner or a setup error fails this job, not the run.
+    continue-on-error: true
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
@@ -422,11 +424,12 @@ jobs:
       - name: Warn on apply cell summaries download failure
         if: ${{ !cancelled() && steps.download.outcome == 'failure' }}
         run: echo "::warning::apply cell summaries download did not complete; the comment may render without per-cell detail"
-      # The gate refresh follows, so a hung comment must end as a failed step, not a cancelled job.
+      # The gate refresh follows, so a hung comment must end as a failed step, not a cancelled job;
+      # 5 minutes leaves the untimed refresh the rest of the job's 15-minute `ubuntu-slim` cap.
       - name: Post apply result comment
         id: result
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 5
         uses: $/actions/apply-summary
         with:
           pr-number: ${{ inputs.pr_number }}

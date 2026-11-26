@@ -1878,7 +1878,7 @@ error that stopped it. Run the command locally to see the whole output.
 
 ### `shipmate / gate` never goes green
 
-Five distinct causes, in the order worth checking.
+Six distinct causes, in the order worth checking.
 
 **No gate status was written at all, as opposed to a red or held one.** The
 engine's `summary` job is skipped on a fork pull request — there is no gate, no
@@ -1924,6 +1924,12 @@ check under a name no current cell reconstructs (a renamed or deleted stack)
 therefore holds the gate indefinitely. GitHub has no way to delete a check run, so the recovery is a
 new head SHA: push a commit, and the plan run re-creates only the checks that
 exist now.
+
+**The gate is pending over apply checks that are all done.** An apply run's
+`summary` cancelled after it posted the result comment refreshes no gate.
+Comment `shipmate apply` again: once the command passes the apply requirements,
+its run's `summary` refreshes the gate whenever `review` succeeds, even when no
+cell is pending (`CONTRACT.md` §Comment-ops, "The aggregate gate").
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
 description telling you what to do, or `pending` reading "Plan run <id> holds

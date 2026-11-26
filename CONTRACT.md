@@ -2227,6 +2227,8 @@ These limits are accepted:
   starts only once it ends, and a stale run whose `waiters` job is pending is not
   cancelled. That lasts while the job waits for a runner, and while a lost
   `waiters` runner goes unnoticed: GitHub ends that job after about 45 minutes.
+  The job holds `continue-on-error: true`, so a lost runner or a setup error fails
+  `waiters` and not the run.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -2545,9 +2547,13 @@ check/status/comment/issue that crosses a workflow-run boundary:
     apply checks pending, so no refresh greens the gate until they apply. An
     apply `summary` cancelled after its result comment posted refreshes no gate:
     the gate keeps its last write until the next refresh, and `outcome` posts no
-    reply, since the comment posted. A comment step stopped at its 10-minute
-    limit after its POST landed leaves `posted` unwritten, so `outcome` may post
-    an ended reply beside the result comment;
+    reply, since the comment posted. To refresh the gate, comment `shipmate apply`
+    again: once the command passes the apply requirements (§Comment-ops), its run's
+    `summary` refreshes the gate whenever `review` succeeds, even when no cell is
+    pending. The comment step stops at 5 minutes, which leaves the gate refresh the
+    rest of the job's 15 minutes; a comment step stopped there after its POST
+    landed leaves `posted` unwritten, so `outcome` may post an ended reply beside
+    the result comment;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
     superseded deploy, unless a cell's apply check is titled `State not saved`
