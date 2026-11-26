@@ -291,7 +291,7 @@ def test_the_composite_mints_only_a_pull_request_write_token():
 def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel, including one while the call waited in
     `apply-run.yml`'s queue. Every fact about the inner run arrives through `run`'s outputs, which
-    read empty when they did not arrive; `guard` refuses an empty `pr_number`. `run-cancelled`
+    read empty when they did not arrive; `admit` refuses an empty `pr_number`. `run-cancelled`
     also reads a call that ended `cancelled` or `skipped` with an empty `review_result` as a
     cancel: it was cancelled while queued, or skipped by a run cancel. A call that failed before
     `review` reported keeps the ended text.
@@ -309,21 +309,20 @@ def test_the_apply_outcome_job_is_wired_exactly():
     cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
     clause (a mid-run cancel reads as ended). The admission clause: a run cancelled after `admit`
     wrote `admitted` still replies, because `always()` stays, even when its queue step was
-    cancelled; a `taken` run (another run of the comment owns it) and a failed claim, which
-    replied itself, do not; an `auto` run does, by its empty `comment_id` even when a lost
-    `admit` runner left `admitted` empty. Mutations: drop the admission clause; drop `admit`
-    from `needs`; compare `admitted` with `!= 'false'` (an empty output would reply); drop
-    `|| github.event.inputs.comment_id == ''` (an `auto` run depends on `admit`'s outputs);
-    key it on `needs.admit.result == 'success'` (a failed queue step would skip the reply). The
-    constant pins each: the expression is never evaluated here."""
+    cancelled; a `taken` run (another run of the comment owns it), a failed claim, which
+    replied itself, and a dispatch `admit` refused do not; nor does a run whose `admit` runner
+    was lost, `auto` included. Mutations: drop the admission clause; drop `admit` from
+    `needs`; compare `admitted` with `!= 'false'` (an empty output would reply); append
+    `|| github.event.inputs.comment_id == ''` to it (an `auto` run refused by a check step would
+    reply); key it on `needs.admit.result == 'success'` (a failed queue step would skip the
+    reply). The constant pins each: the expression is never evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
-        "needs": ["guard", "admit", "run"],
+        "needs": ["admit", "run"],
         "if": (
-            "${{ always() && needs.guard.result == 'success' && "
-            "needs.run.outputs.posted != 'true' && "
+            "${{ always() && needs.run.outputs.posted != 'true' && "
             "(needs.run.outputs.review_result != 'failure' || "
             "(needs.run.outputs.unbound != 'true' && !inputs.auto)) && "
-            "(needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}"
+            "needs.admit.outputs.admitted == 'true' }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,

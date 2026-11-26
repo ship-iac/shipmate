@@ -51,7 +51,7 @@ EXPECTED_STRATEGIES = {
 #: Each env-level call's whole `with:` in the two callers.
 #: The pre-merge apply passes its pull request, whose cell locks each cell verifies; the merge
 #: deploy passes the merged pull request with `deploy: true`, and each cell refuses only a lock
-#: another pull request holds.
+#: another pull request holds. Only the apply's first populated level takes `lock`'s snapshot.
 EXPECTED_ENVLEVEL_WITH = {
     (workflow, f"envlevel{n}"): {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
@@ -59,6 +59,16 @@ EXPECTED_ENVLEVEL_WITH = {
         "runs_on": "${{ inputs.runs_on }}",
         "tools": "${{ needs.detect.outputs.tools }}",
         **extra,
+        **(
+            {
+                "by_wave": (
+                    f"${{{{ needs.detect.outputs.first_level == '{n}' && "
+                    "needs.lock.outputs.by_wave || '' }}"
+                )
+            }
+            if workflow == "apply-run.yml"
+            else {}
+        ),
     }
     for workflow, extra in (
         (
@@ -113,7 +123,7 @@ def test_every_matrix_job_carries_exactly_this_strategy():
 
 def test_apply_env_level_takes_no_cap():
     """Mutations: declare a `max_parallel` input on `apply-env-level.yml`; make `tools`
-    optional."""
+    optional; `by_wave` default `"x"`."""
     inputs = workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]["inputs"]
     assert inputs == {
         "waves_json": {"required": True, "type": "string"},
@@ -125,13 +135,21 @@ def test_apply_env_level_takes_no_cap():
         "base_sha": {"required": False, "type": "string", "default": ""},
         "deploy": {"required": False, "type": "boolean", "default": False},
         "tools": {"required": True, "type": "string"},
+        "by_wave": {"required": False, "type": "string", "default": ""},
     }
+
+
+def test_apply_env_level_publishes_no_output():
+    """Mutation: declare `on.workflow_call.outputs` with a `by_wave` output."""
+    assert "outputs" not in workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]
 
 
 def test_no_env_level_call_passes_a_cap():
     """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
     or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply-run.yml`'s
-    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call."""
+    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call; pass `by_wave: x` in
+    `deploy.yml`'s `envlevel0` call; compare `'0'` in `apply-run.yml`'s `envlevel1` `by_wave`, so
+    a level that is not the first skips its own snapshot."""
     found = {
         (workflow, job_id): job["with"]
         for workflow in ("apply-run.yml", "deploy.yml")

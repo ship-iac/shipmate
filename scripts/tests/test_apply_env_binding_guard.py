@@ -13,7 +13,8 @@ Invariants:
   mint from: a job that gains an env-derived binding is the regression;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
-  refuse the run;
+  refuse the run. `apply-run.yml`'s `lock` does the same for the first populated
+  env-level, before its wave0 release;
 - every apply-cell invocation passes the reviewed plan text's digest, which the
   action refuses to apply without.
 
@@ -120,9 +121,23 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
     )
     wave0_needs = workflow_jobs("apply-env-level.yml")["wave0"]["needs"]
     assert wave0_needs == ["snapshot", "wave0-release"], (
-        "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
-        "wave is already applying"
+        "wave0 must wait for snapshot whenever snapshot runs, or the pre-flight refuses "
+        "a run whose first wave is already applying"
     )
+
+
+#: `apply-run.yml`'s `lock` steps from the pre-flight on, by action path, hand-written.
+LOCK_TAIL = [
+    local_action("verify-environments"),
+    local_action("apply-snapshot"),
+    local_action("apply-release"),
+]
+
+
+def test_lock_verifies_the_first_levels_environments_before_snapshotting_and_releasing():
+    """Mutation: swap `lock`'s `verify` and `snap` steps."""
+    uses = [s.get("uses", "") for s in workflow_jobs("apply-run.yml")["lock"]["steps"]]
+    assert uses[2:] == LOCK_TAIL
 
 
 def test_every_apply_cell_invocation_passes_the_reviewed_plan_digest():

@@ -348,6 +348,85 @@ def test_check_runs_narrows_to_one_name_url_encoded():
     ]
 
 
+def test_a_counted_listing_narrows_to_one_name_url_encoded():
+    """Mutation: drop `query` from the counted `_pages` path -> the page names no check."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return json.dumps({"total_count": 1, "check_runs": [{"id": 1}]})
+
+    out = check_runs("o/r", _SHA, run=run, name="apply / dev / stacks/a", counted=True)
+    assert (out, calls) == (
+        '{"id": 1}\n',
+        [
+            [
+                "gh",
+                "api",
+                (
+                    f"repos/o/r/commits/{_SHA}/check-runs?filter=all"
+                    "&check_name=apply%20%2F%20dev%20%2F%20stacks%2Fa&per_page=100&page=1"
+                ),
+            ]
+        ],
+    )
+
+
+def _check_pages(*pages):
+    """A `run` double answering page N of the counted listing with `pages[N - 1]`, a
+    `(rows, total_count)` pair, and the calls it got."""
+    calls = []
+    path = f"repos/o/r/commits/{_SHA}/check-runs?filter=all&per_page=100&page="
+
+    def run(args):
+        calls.append(args)
+        rows, total = pages[int(args[2].removeprefix(path)) - 1]
+        return json.dumps({"total_count": total, "check_runs": rows})
+
+    return calls, run, [["gh", "api", f"{path}{n}"] for n in range(1, len(pages) + 1)]
+
+
+_HUNDRED_ONE = [{"id": i} for i in range(101)]
+
+
+def test_a_counted_listing_returns_every_row_of_every_page():
+    """Mutation: ignore `counted` -> the `--paginate` argv is sent instead of the two pages."""
+    calls, run, pages = _check_pages((_HUNDRED_ONE[:100], 101), (_HUNDRED_ONE[100:], 101))
+    out = check_runs("o/r", _SHA, run=run, counted=True)
+    assert (out, calls) == ("".join(json.dumps(r) + "\n" for r in _HUNDRED_ONE), pages)
+
+
+def test_a_counted_listing_short_of_its_total_count_refuses(capsys):
+    """Pages that advertise 102 checks and hold 101. Mutations: compare `>=` instead of `==` in
+    `_pages`' count check -> the short listing is returned; ignore `counted` -> no refusal."""
+    calls, run, pages = _check_pages((_HUNDRED_ONE[:100], 102), (_HUNDRED_ONE[100:], 102))
+    with pytest.raises(SystemExit) as exc:
+        check_runs("o/r", _SHA, run=run, counted=True)
+    assert (exc.value.code, capsys.readouterr().err, calls) == (
+        f"::error::the check-run listing on {_SHA} is incomplete",
+        (
+            f"::warning::repos/o/r/commits/{_SHA}/check-runs?filter=all advertised [102, 102] "
+            "entries and returned 101\n"
+        ),
+        pages,
+    )
+
+
+def test_a_counted_listing_refuses_another_projection_before_any_call():
+    """Rows come back whole, so a projection would be silently ignored. Mutation: drop the
+    `jq` refusal -> the listing is read."""
+    calls, run, _ = _check_pages(([], 0))
+    with pytest.raises(SystemExit) as exc:
+        check_runs("o/r", _SHA, ".check_runs[] | {name}", run=run, counted=True)
+    assert (exc.value.code, calls) == (
+        (
+            "::error::a counted check-run listing serves only .check_runs[] "
+            "(got '.check_runs[] | {name}')"
+        ),
+        [],
+    )
+
+
 _BAD_GATEWAY = "::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)\nretry 50%"
 #: PROBE: gh's message for a refused connection, captured raw from a run behind a dead proxy.
 _REFUSED = (

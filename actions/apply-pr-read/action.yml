@@ -1,0 +1,74 @@
+name: shipmate apply-pr-read
+description: >-
+  Read the pull request's review decision server-side and refuse unless `ref` is the head of an
+  open, non-draft, same-repository pull request. apply-run.yml's `review` reads with its App
+  token and `detect` with its job token; `lock` refuses unless both read the same decision.
+inputs:
+  token:
+    description: A token that can read the pull request.
+    required: true
+  pr-number:
+    description: The pull request to read.
+    required: true
+  ref:
+    description: The head SHA the dispatch names.
+    required: true
+outputs:
+  decision: { description: "The pull request's `reviewDecision`, `NONE` when it has none; empty when the step refused.", value: "${{ steps.rd.outputs.decision }}" }
+  unbound: { description: "`true` when no open pull request matched; empty otherwise.", value: "${{ steps.rd.outputs.unbound }}" }
+  refusal: { description: "The refusal message without the `::error::` prefix, every CR and LF replaced by a space; empty when the step did not refuse. Set although the step fails. Carries the dispatcher-supplied `ref`, so a reader passes it through `env:`.", value: "${{ steps.rd.outputs.refusal }}" }
+runs:
+  using: composite
+  steps:
+    - id: rd
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        OWNER: ${{ github.repository_owner }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REF: ${{ inputs.ref }}
+      run: |
+        set -euo pipefail
+        # The message names the dispatcher-supplied `ref`: a newline left in it would write a
+        # second output line, a forged `decision` or `unbound`.
+        refuse() {
+          local msg="${1//[$'\r\n']/ }"
+          echo "refusal=$msg" >> "$GITHUB_OUTPUT"
+          echo "::error::$msg"
+          exit 1
+        }
+        # On a query error gh prints the raw body (`--jq` not applied). Only NOT_FOUND there
+        # writes `unbound`, so `outcome` replies to every other failed read. `read` collapses
+        # adjacent tabs, so every @tsv field is non-empty.
+        rc=0
+        # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
+        pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
+          -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+          --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv') || rc=$?
+        if [[ "$rc" -ne 0 && "$pr" == *'"type":"NOT_FOUND"'* ]]; then
+          echo "unbound=true" >> "$GITHUB_OUTPUT"
+          refuse "Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
+        fi
+        if [[ "$rc" -ne 0 ]]; then
+          refuse "Could not read pull request #$PR_NUMBER (gh exited $rc); nothing applies. Comment \`shipmate apply\` on the pull request again."
+        fi
+        if [[ -z "$pr" ]]; then
+          echo "unbound=true" >> "$GITHUB_OUTPUT"
+          refuse "Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
+        fi
+        IFS=$'\t' read -r state draft cross head rd <<< "$pr"
+        if [[ "$state" != OPEN ]]; then
+          echo "unbound=true" >> "$GITHUB_OUTPUT"
+          refuse "Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
+        fi
+        if [[ "$draft" != false ]]; then
+          refuse "Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
+        fi
+        if [[ "$cross" != false ]]; then
+          refuse "Pull request #$PR_NUMBER comes from a fork; nothing applies."
+        fi
+        if [[ "$head" != "$REF" ]]; then
+          refuse "Pull request #$PR_NUMBER head is $head, but this dispatch names $REF; nothing applies. Comment \`shipmate apply\` on the pull request."
+        fi
+        # NONE: no review rule, or code-owner review owns no changed file.
+        echo "decision=$rd" >> "$GITHUB_OUTPUT"

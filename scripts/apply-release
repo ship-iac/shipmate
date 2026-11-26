@@ -7,7 +7,8 @@ run's page>, "started_at": <the release, UTC, to the second>}` through `patch-ch
 writes nothing on a pre-merge re-run, nor on a pre-merge run whose pull request,
 `SHIPMATE_PR_NUMBER`, reads merged (one read, one notice; a merge deploy reads none). Never
 `output`: that would replace the check's plan text. A failed write or read fails the job, which
-skips the wave, and the level's `complete` returns every check of it to `queued`, titled `Not run`.
+skips the wave; the level's `complete`, or `apply-run.yml`'s `unflip` for the first level's
+wave0 that `lock` released, returns every check of it to `queued`, titled `Not run`.
 """
 
 import json

@@ -38,7 +38,7 @@ after a cell pending in another environment waits (`waves.waiting_cells`): it st
 pending, `waiting_cells` names it, and the rest apply. A cell another pull request
 holds a cell lock on stays pending the same way, named in `held_cells` (both forms),
 and the cells that run after it wait. Before any of that, the
-PR's review decision — read server-side by the `review` job, narrowed by
+PR's review decision — read server-side by this job's own pull-request read, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
 
@@ -719,14 +719,14 @@ def validate_env(value):
 
 def refuse_undetermined(decision):
     """Fail on a review decision `authorize._review_reason` neither passes nor refuses by rule
-    (`authorize.RULE_DECISIONS`), as plain `SystemExit`: it never arrived or has an unknown
-    value, an engine fault rather than a rule, so it is no `Refused` (a failed review read fails
-    the `review` job before this runs)."""
+    (`authorize.RULE_DECISIONS`), as plain `SystemExit`: an unknown value from GitHub, an engine
+    fault rather than a rule, so it is no `Refused` (a failed pull-request read fails `detect`'s
+    `pr` step before this runs)."""
     if decision not in az.RULE_DECISIONS and az._review_reason(decision):
         raise SystemExit(
             f"::error::not authorized: could not determine the PR's review decision "
-            f"(got {decision!r}); the apply run's `review` job passed `detect` no decision this "
-            "engine knows; check the pinned engine version, then retry."
+            f"(got {decision!r}); GitHub returned a review decision this engine does not know; "
+            "check the pinned engine version, then retry."
         )
 
 
@@ -734,7 +734,7 @@ def refuse_unreviewed(env, table, decision):
     """Refuse a targeted apply the PR's review decision does not authorize.
 
     The same `authorize._review_reason` comment-ops evaluated, re-run against the
-    decision the `review` job read server-side: comment-ops decided on the state
+    decision `detect` read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
     The run dies before any wave, the apply checks stay pending, and the gate stays
     pending with them. An undetermined decision fails first (`refuse_undetermined`); every
@@ -1169,9 +1169,16 @@ def bare_main(auto=False):
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         **auto_outputs,
     )
+
+
+def first_level(per_level):
+    """The lowest env-level of `per_level` with a cell in any wave, as `'0'`..`'3'`; `''` when
+    none has one. `apply-run.yml`'s `lock` snapshots and releases that level's wave0."""
+    return next((str(n) for n, waves in enumerate(per_level) if any(waves.values())), "")
 
 
 def main():
@@ -1252,6 +1259,7 @@ def main():
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         base_sha=base_sha,
     )

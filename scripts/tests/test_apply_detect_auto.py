@@ -296,9 +296,9 @@ def test_an_undetermined_decision_fails_before_any_read(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         _run_auto(tmp_path, monkeypatch, decision="", calls=calls)
     assert exc.value.code == (
-        "::error::not authorized: could not determine the PR's review decision (got ''); the "
-        "apply run's `review` job passed `detect` no decision this engine knows; check the "
-        "pinned engine version, then retry."
+        "::error::not authorized: could not determine the PR's review decision (got ''); GitHub "
+        "returned a review decision this engine does not know; check the pinned engine version, "
+        "then retry."
     )
     assert type(exc.value) is SystemExit
     assert calls == []

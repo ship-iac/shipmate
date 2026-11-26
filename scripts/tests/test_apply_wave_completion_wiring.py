@@ -1,8 +1,10 @@
 """Guards the per-wave apply-check flip and completion in `apply-env-level.yml`.
 
 Each `waveN-release` job flips its wave's checks to `in_progress` right before that wave, from
-`snapshot`'s `by_wave` slice; the wave needs it and runs only when it succeeded, and it runs only
-when every earlier wave and release succeeded or was skipped. Each `waveN-complete` job writes
+the `by_wave` slice the caller supplied, or else `snapshot`'s; the wave needs it and runs only
+when it succeeded, and it runs only when every earlier wave and release succeeded or was
+skipped. A caller that supplies `by_wave` has already flipped `wave0`, so `snapshot` and
+`wave0-release` skip and `wave0` runs without them. Each `waveN-complete` job writes
 its own wave's checks right after that wave. It runs only when its wave reached a result: a
 skipped wave's listing row carries the literal matrix template, so a completion over it matches
 no cell and fails after the action's retry. It runs only when the next wave is populated: the
@@ -37,7 +39,7 @@ COMPLETION_STEPS = [
     {
         "uses": "$/actions/apply-complete",
         "with": {
-            "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
+            "by-wave": "${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}",
             "wave-results": "${{ env.WAVE_RESULTS }}",
             "job-id": "${{ job.check_run_id }}",
             "deploy": "${{ inputs.deploy }}",
@@ -52,7 +54,7 @@ def _completion(n):
     return {
         "needs": ["snapshot", f"wave{n}"],
         "if": (
-            "${{ always() && needs.snapshot.result == 'success' && "
+            "${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && "
             f"(needs.wave{n}.result == 'success' || needs.wave{n}.result == 'failure') "
             f"&& toJSON(fromJSON(inputs.waves_json).wave{n + 1}) != '[]' }}}}"
         ),
@@ -69,7 +71,7 @@ def _completion(n):
 WAVE3_COMPLETE = {
     "needs": ["snapshot", "wave3"],
     "if": (
-        "${{ always() && needs.snapshot.result == 'success' && "
+        "${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && "
         "(needs.wave3.result == 'success' || needs.wave3.result == 'failure') "
         "&& toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}"
     ),
@@ -82,7 +84,7 @@ WAVE3_COMPLETE = {
         {
             "uses": "$/actions/apply-complete",
             "with": {
-                "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
+                "by-wave": "${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}",
                 "wave-results": "${{ env.WAVE_RESULTS }}",
                 "job-id": "${{ job.check_run_id }}",
                 "deploy": "${{ inputs.deploy }}",
@@ -121,7 +123,7 @@ COMPLETE = {
         "wave5-complete",
         "wave6-complete",
     ],
-    "if": "${{ always() && needs.snapshot.result == 'success' }}",
+    "if": "${{ always() && (needs.snapshot.result == 'success' || inputs.by_wave != '') }}",
     "runs-on": "ubuntu-slim",
     "permissions": {"actions": "read", "checks": "read"},
     "environment": {"name": "shipmate-engine", "deployment": False},
@@ -159,7 +161,7 @@ WAVE_NEEDS = {
 WAVE_IF = {
     "wave0": (
         "${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' "
-        "&& needs.wave0-release.result == 'success' }}"
+        "&& (needs.wave0-release.result == 'success' || inputs.by_wave != '') }}"
     ),
     **{
         f"wave{n}": (
@@ -173,6 +175,11 @@ WAVE_IF = {
 
 
 def _release(n):
+    snapshot_ok = "needs.snapshot.result == 'success'"
+    by_wave = "needs.snapshot.outputs.by_wave"
+    if n:
+        snapshot_ok = "(needs.snapshot.result == 'success' || inputs.by_wave != '')"
+        by_wave = "inputs.by_wave || needs.snapshot.outputs.by_wave"
     earlier = "".join(
         f" && (needs.wave{k}.result == 'success' || needs.wave{k}.result == 'skipped')"
         f" && (needs.wave{k}-release.result == 'success'"
@@ -182,7 +189,7 @@ def _release(n):
     return {
         "needs": ["snapshot", *(j for k in range(n) for j in (f"wave{k}", f"wave{k}-release"))],
         "if": (
-            "${{ !cancelled() && needs.snapshot.result == 'success' && "
+            f"${{{{ !cancelled() && {snapshot_ok} && "
             f"toJSON(fromJSON(inputs.waves_json).wave{n}) != '[]'{earlier} }}}}"
         ),
         "runs-on": "ubuntu-slim",
@@ -192,9 +199,7 @@ def _release(n):
             {
                 "uses": "$/actions/apply-release",
                 "with": {
-                    "snapshot": (
-                        f"${{{{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave{n}) }}}}"
-                    ),
+                    "snapshot": f"${{{{ toJSON(fromJSON({by_wave}).wave{n}) }}}}",
                     "deploy": "${{ inputs.deploy }}",
                     "pr-number": "${{ inputs.pr_number }}",
                     **_WITH_KEY,
@@ -231,7 +236,7 @@ WAVE0_RELEASE = {
 WAVE2_RELEASE = {
     "needs": ["snapshot", "wave0", "wave0-release", "wave1", "wave1-release"],
     "if": (
-        "${{ !cancelled() && needs.snapshot.result == 'success' && "
+        "${{ !cancelled() && (needs.snapshot.result == 'success' || inputs.by_wave != '') && "
         "toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && "
         "(needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && "
         "(needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && "
@@ -245,7 +250,10 @@ WAVE2_RELEASE = {
         {
             "uses": "$/actions/apply-release",
             "with": {
-                "snapshot": "${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave2) }}",
+                "snapshot": (
+                    "${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave)"
+                    ".wave2) }}"
+                ),
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -278,14 +286,16 @@ def test_complete_waits_for_every_release_wave_and_completion():
 
     Mutations: drop `wave6-complete` from `complete.needs`; add `continue-on-error: true` to
     `complete`; drop `wave4-release` from `complete.needs`; `wave5` under `"wave6"` in its
-    `env`."""
+    `env`; `complete.if` back to `always() && needs.snapshot.result == 'success'`, which skips
+    the first level's `complete` when the caller supplied `by_wave`."""
     assert workflow_jobs("apply-env-level.yml")["complete"] == COMPLETE
 
 
 @pytest.mark.parametrize("job", [*COMPLETIONS, "complete"])
 def test_every_completion_runs_the_one_shared_step_list(job):
     """Mutations: `${{ env.WAVE_RESULT }}` in the anchored `with:`; `complete`'s steps written
-    out with a different `job-id`."""
+    out with a different `job-id`; the anchored `by-wave` reads
+    `needs.snapshot.outputs.by_wave` alone."""
     assert workflow_jobs("apply-env-level.yml")[job]["steps"] == COMPLETION_STEPS
 
 
@@ -298,7 +308,7 @@ def test_each_wave_needs_its_release_and_no_completion():
 
 def test_each_wave_runs_only_after_its_release_succeeded():
     """Mutations: drop `&& needs.wave5-release.result == 'success'` from `wave5.if`; `!=` for
-    `==` in it."""
+    `==` in it; drop `|| inputs.by_wave != ''` from `wave0.if`."""
     jobs = workflow_jobs("apply-env-level.yml")
     assert {w: jobs[w]["if"] for w in WAVES} == WAVE_IF
 
@@ -307,7 +317,8 @@ def test_each_wave_runs_only_after_its_release_succeeded():
 def test_each_release_job_is_exactly(n):
     """Mutations: drop `snapshot` from `wave2-release.needs`; drop the `!cancelled()` prefix from
     `wave4-release.if`; `'failure'` for `'skipped'` in one clause of `wave6-release.if`; add
-    `continue-on-error: true` to `wave1-release`; `.wave2` in `wave3-release`'s slice."""
+    `continue-on-error: true` to `wave1-release`; `.wave2` in `wave3-release`'s slice;
+    `wave3-release`'s slice reads `needs.snapshot.outputs.by_wave` alone."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-release"] == _release(n)
 
 
@@ -318,11 +329,35 @@ def test_release_jobs_are_written_out(n, expected):
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-release"] == expected
 
 
-def test_snapshot_publishes_only_the_per_wave_map():
-    """Mutations: drop `snapshot`'s `by_wave` output; add back a `snapshot` output."""
-    assert workflow_jobs("apply-env-level.yml")["snapshot"]["outputs"] == {
-        "by_wave": "${{ steps.snap.outputs.by_wave }}",
-    }
+#: Runs only when the caller supplied no `by_wave`, and publishes only the per-wave map.
+SNAPSHOT = {
+    "if": "${{ inputs.by_wave == '' }}",
+    "runs-on": "ubuntu-slim",
+    "permissions": {"checks": "read", "actions": "read"},
+    "environment": {"name": "shipmate-engine", "deployment": False},
+    "outputs": {"by_wave": "${{ steps.snap.outputs.by_wave }}"},
+    "steps": [
+        {
+            "uses": "$/actions/verify-environments",
+            "with": {"waves-json": "${{ inputs.waves_json }}"},
+        },
+        {
+            "id": "snap",
+            "uses": "$/actions/apply-snapshot",
+            "with": {
+                "head-sha": "${{ inputs.head_sha }}",
+                "waves-json": "${{ inputs.waves_json }}",
+                **_WITH_KEY,
+            },
+        },
+    ],
+}
+
+
+def test_snapshot_job_is_exactly():
+    """Mutations: drop `snapshot`'s `by_wave` output; add back a `snapshot` output;
+    `snapshot.if` -> `inputs.by_wave != ''`."""
+    assert workflow_jobs("apply-env-level.yml")["snapshot"] == SNAPSHOT
 
 
 def test_the_job_set_is_exactly():
@@ -330,11 +365,12 @@ def test_the_job_set_is_exactly():
     assert sorted(workflow_jobs("apply-env-level.yml")) == JOB_IDS
 
 
-def _runs(expr, populated, results):
+def _runs(expr, populated, results, supplied):
     """The value of a job's `if:` for the forms the completion jobs write: `always()`,
-    `needs.<job>.result`, the `waves_json` emptiness test, `==`, `||`, `&&`, parentheses
-    and quoted strings; anything else fails the test."""
+    `needs.<job>.result`, the `waves_json` emptiness test, the `by_wave` supplied test, `==`,
+    `||`, `&&`, parentheses and quoted strings; anything else fails the test."""
     py = expr.removeprefix("${{").removesuffix("}}").strip()
+    py = py.replace("inputs.by_wave != ''", str(supplied))
     py = re.sub(
         r"toJSON\(fromJSON\(inputs\.waves_json\)\.(wave\d)\) != '\[\]'",
         lambda m: str(m[1] in populated),
@@ -347,18 +383,19 @@ def _runs(expr, populated, results):
     return eval(py, {"__builtins__": {}})  # noqa: S307
 
 
-def test_two_populated_waves_complete_the_first_and_leave_the_last_to_complete():
+@pytest.mark.parametrize(("snapshot", "supplied"), [("success", False), ("skipped", True)])
+def test_two_populated_waves_complete_the_first_and_leave_the_last_to_complete(snapshot, supplied):
     """With `wave0` and `wave1` populated and applied, `wave0-complete` runs (a later wave
     exists), `wave1-complete` and every later completion skip, and `complete` runs and writes
-    wave 1.
+    wave 1, whether `snapshot` ran or the caller supplied `by_wave`.
 
     Mutation: drop the next-wave clause from `wave1-complete`'s `if:` -- it runs."""
     jobs = workflow_jobs("apply-env-level.yml")
-    results = {"snapshot": "success", "wave0": "success", "wave1": "success"}
+    results = {"snapshot": snapshot, "wave0": "success", "wave1": "success"}
     results |= {w: "skipped" for w in WAVES[2:]}
     ran = {
         job
         for job in [*COMPLETIONS, "complete"]
-        if _runs(jobs[job]["if"], {"wave0", "wave1"}, results)
+        if _runs(jobs[job]["if"], {"wave0", "wave1"}, results, supplied)
     }
     assert ran == {"wave0-complete", "complete"}

@@ -829,8 +829,8 @@ def test_main_fails_an_undetermined_decision_before_any_read(tmp_path, monkeypat
         )
     assert exc.value.code == (
         f"::error::not authorized: could not determine the PR's review decision (got '{got}'); "
-        "the apply run's `review` job passed `detect` no decision this engine knows; check the "
-        "pinned engine version, then retry."
+        "GitHub returned a review decision this engine does not know; check the pinned engine "
+        "version, then retry."
     )
     assert type(exc.value) is SystemExit
     assert urls == []
@@ -908,6 +908,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
     assert detect_report()["excluded_envs"] == ["prod-eu"]
     assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
     assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
+    assert parsed["first_level"] == "0"
 
 
 def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
@@ -1320,6 +1321,7 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
         decision="APPROVED",
     )
     assert _applied(parsed) == []
+    assert parsed["first_level"] == ""
     assert detect_report()["waiting_cells"] == [
         {"stack": "b", "environment": "e0", "after_stack": "c", "after_environment": "ex"},
         {"stack": "r", "environment": "e1", "after_stack": "c", "after_environment": "ex"},
@@ -1762,9 +1764,9 @@ def test_an_undetermined_bare_apply_fails_without_listing_plan_runs(tmp_path, mo
             urls=urls,
         )
     assert str(exc_info.value) == (
-        "::error::not authorized: could not determine the PR's review decision (got ''); the "
-        "apply run's `review` job passed `detect` no decision this engine knows; check the "
-        "pinned engine version, then retry."
+        "::error::not authorized: could not determine the PR's review decision (got ''); GitHub "
+        "returned a review decision this engine does not know; check the pinned engine version, "
+        "then retry."
     )
     assert urls == []
     assert clock.sleeps == []
