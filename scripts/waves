@@ -22,17 +22,19 @@ Bumping it needs, per new level N:
 - `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
   actions/apply-detect/action.yml, and the '0' to '3' range in apply-detect's `first_level`
   description;
-- in .github/workflows/deploy.yml, the `detect` outputs, an `envlevelN` job named `L<N>` and
-  its entry in `summary`'s `needs:`;
+- in .github/workflows/deploy.yml, the `detect` outputs, an `envlevelN` job named `L<N>`, its
+  `needs:` listing every lower envlevel job, and its entry in `summary`'s `needs:`;
 - in .github/workflows/apply-run.yml, a level-N copy of every `envlevel3` and
   `first_level == '3'` site: the `detect` outputs, an `envlevelN` job named `L<N>` with its
-  `by_wave` selector, a `jobs.envlevelN.result == 'cancelled'` term in the `run_cancelled`
-  output, the `needs:` entries of `unflip` and `summary`, `lock`'s `envlevelN-waves` input
-  and `waves-json` selectors, `unflip`'s `if:` and `resnap`, and the `envlevelN-waves`
-  input on the `summary` step;
+  `needs:` listing every lower envlevel job and its `by_wave` selector, a
+  `jobs.envlevelN.result == 'cancelled'` term in the `run_cancelled` output, the `needs:`
+  entries of `unflip` and `summary`, `lock`'s `envlevelN-waves` input and `waves-json`
+  selectors, `unflip`'s `if:` and `resnap`, and the `envlevelN-waves` input on the `summary`
+  step;
 - an `envlevelN-waves` input, with its `SHIPMATE_ENVLEVELN_WAVES` env line, on
   actions/lock-acquire/action.yml and actions/apply-summary/action.yml;
-- the `range(4)` over `SHIPMATE_ENVLEVEL<n>_WAVES` in scripts/cell-lock.
+- the `range(4)` over `SHIPMATE_ENVLEVEL<n>_WAVES` in scripts/cell-lock, and its docstring
+  naming `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES`.
 
 A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
 It runs nothing on import -- it only defines functions and constants.
