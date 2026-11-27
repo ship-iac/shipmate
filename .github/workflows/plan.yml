@@ -7,8 +7,9 @@ on:
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
       # All `required: false`, for apply.yml's reason: `summary` binds `shipmate-engine` and the
-      # cells bind `<env>-plan`, so a caller has no environment-scoped secret to pass and a required
-      # declaration rejects the call. The App key lives only on `shipmate-engine`.
+      # cells bind `<env>-plan` (the bare `<env>` under `split: false`), so a caller has no
+      # environment-scoped secret to pass and a required declaration rejects the call. The App key
+      # lives only on `shipmate-engine`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_ENCRYPTION_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
