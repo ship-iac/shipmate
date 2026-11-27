@@ -25,7 +25,7 @@ READING_STEPS = {
 }
 
 SLUG = "${{ steps.token.outputs.app-slug }}"
-MINT = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
+MINT = "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc"
 SCRIPT = "$GITHUB_ACTION_PATH/../../scripts/gate-status"
 ASSIGNMENT = f"gate_status={SCRIPT}"
 #: Every `gate-status` subcommand, hand-written.
