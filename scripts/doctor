@@ -697,11 +697,11 @@ def _engine_environment_warnings(ctx):
                 WARNING,
                 (
                     f"GitHub Environment `{_ENGINE_ENV}` does not exist, so nothing scopes "
-                    "which branches may claim the shipmate App private key. If the key is "
-                    "still a repository secret, every branch's workflow can read it, and a "
-                    "repository- or organization-scoped key also makes every apply refuse; "
-                    "delete those copies and keep the key only on shipmate-engine (see "
-                    "docs/github-app.md)."
+                    "which branches may claim the shipmate App private key. If the key is a "
+                    "repository or organization secret, every branch's workflow can read it "
+                    "and every cell's apply job also refuses. Create shipmate-engine with a "
+                    "deployment branch policy naming only the default branch and move the key "
+                    "there (see docs/github-app.md)."
                 ),
             )
         ]
