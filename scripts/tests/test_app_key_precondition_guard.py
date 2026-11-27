@@ -174,7 +174,7 @@ def test_every_mint_site_verifies_the_key_arrived():
 _SNAPSHOT_MINT = {
     "name": "Mint App installation token",
     "id": "token",
-    "uses": "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+    "uses": "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc",
     "with": {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",

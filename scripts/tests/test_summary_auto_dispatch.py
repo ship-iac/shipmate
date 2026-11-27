@@ -230,7 +230,7 @@ def test_the_summary_decides_and_calls_the_dispatch_composite_exactly():
 
 _DEFERRED = "${{ inputs.deferred-to != '' }}"
 _EITHER = "${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}"
-_MINT = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
+_MINT = "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc"
 _APP = {
     "client-id": "${{ inputs.app-id }}",
     "private-key": "${{ inputs.private-key }}",
