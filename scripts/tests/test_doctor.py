@@ -1117,13 +1117,16 @@ def test_missing_engine_environment_warns(monkeypatch):
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
     assert out[0][0] == doctor.WARNING
-    assert "shipmate-engine" in out[0][1]
-    assert "does not exist" in out[0][1]
     # The probe never checks where the key actually lives -- listing repository
     # secrets needs an App permission app/manifest.json does not declare -- so
     # the repository-secret consequence must stay conditional, not asserted.
-    assert "If the key is still a repository secret" in out[0][1]
-    assert "is still a repository secret and" not in out[0][1]
+    assert out[0][1] == (
+        "GitHub Environment `shipmate-engine` does not exist, so nothing scopes which branches "
+        "may claim the shipmate App private key. If the key is still a repository secret, every "
+        "branch's workflow can read it, and a repository- or organization-scoped key also makes "
+        "every apply refuse; delete those copies and keep the key only on shipmate-engine (see "
+        "docs/github-app.md)."
+    )
 
 
 def test_engine_environment_without_a_branch_policy_warns(monkeypatch):

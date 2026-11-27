@@ -95,7 +95,10 @@ then stores two things:
 either: a repository secret is readable by any workflow on any branch, while the
 `shipmate-engine` environment secret §5 and §6 place the key in is scoped to one
 ref. That difference is the whole key-exposure boundary; §Key-exposure boundary
-states it in full.
+states it in full. A repository or organization secret of that name also reaches
+every cell's `apply` job, because the waves pass the key through, and that job
+refuses at its first step, before checkout: keep the key only on
+`shipmate-engine`.
 
 Keep the `--out` file: §6 reads it for every consumer repository, and `gh`
 cannot read a secret's value back once set. Shred it once every repository has
@@ -133,8 +136,10 @@ boundary).
 
 `SHIPMATE_APP_PRIVATE_KEY` is a secret on this environment, never a repository
 or org secret. §Key-exposure boundary explains why that scoping is what keeps the
-key out of a branch-authored workflow. Create it once in your repository, with a
-deployment branch policy naming exactly the default branch — or run
+key out of a branch-authored workflow. A repository or org copy makes every
+cell's `apply` job refuse at its first step, before checkout. Create it once in
+your repository, with a deployment branch policy naming exactly the default
+branch — or run
 `scripts/onboard`, which creates it, scopes it, and does §6 as well
 ([`getting-started.md`](getting-started.md) §Quick path):
 
@@ -216,11 +221,12 @@ gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
 gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
 ```
 
-**Confirm the repository secret is gone.** Nothing else will tell you:
+**Confirm the repository secret is gone.** `shipmate doctor` cannot see it:
 listing a repository's secrets needs a permission the App manifest does not
-declare, so `shipmate doctor` cannot see this and reports all clear on a
-repository whose environment is shaped correctly while the key is still
-branch-readable (`docs/hardening.md` #16):
+declare, so doctor reports all clear on a repository whose environment is shaped
+correctly while the key is still branch-readable (`docs/hardening.md` #16).
+Every apply refuses while that copy survives: each cell's `apply` job fails at
+its first step and names the secret. Check now:
 
 ```bash
 gh secret list --repo "$REPO"
