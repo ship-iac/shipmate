@@ -21,7 +21,7 @@ without saving its state (`refuse_in_flight`).
 
 It also writes `warm`, the cache warm-up matrix (`warm_rows`), which never refuses,
 `max_parallel`, its cap, and `push`, the stacks the push changed (`push_stacks`), which the
-`summary` job's re-plan of open pull requests reads.
+`replan` job's re-plan of open pull requests reads.
 """
 
 import json

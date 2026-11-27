@@ -4,9 +4,9 @@ on:
     inputs:
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
-      # `required: false`, as drift.yml and the apply path declare it: the job binds
-      # `shipmate-engine`, so a required declaration would fail at load time for every consumer
-      # who scopes the key to an environment instead of the repository.
+      # `required: false`, as drift.yml and the apply path declare it: the key lives on the
+      # `shipmate-engine` environment this job binds, so a required declaration rejects the call.
+      # A repository- or organization-scoped key is unsupported: every cell's `apply` job refuses it.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 # Floor, not a default to inherit from: see plan.yml.
 permissions: {}

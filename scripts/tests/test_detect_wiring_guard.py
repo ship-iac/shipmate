@@ -248,7 +248,7 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
 
 def test_the_deploy_detect_job_outputs_exactly_these_expressions():
     """Mutations: delete `tools`, so every wave cell refuses; read it from `steps.d`; delete
-    `push`, so the summary re-plans no open pull request."""
+    `push`, so `replan` re-plans no open pull request."""
     assert workflow_yaml("deploy.yml")["jobs"]["detect"]["outputs"] == _DEPLOY_DETECT_OUTPUTS
 
 
