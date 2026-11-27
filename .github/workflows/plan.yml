@@ -6,9 +6,9 @@ on:
       # `gate-hold` and `outcome` run on ubuntu-slim.
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
-      # Both `required: false`, for apply.yml's reason: the `summary` job binds
-      # `shipmate-engine` and the cells bind `<env>-plan`, so a required declaration would fail
-      # at load time for every consumer who scopes a key to an environment instead of the repo.
+      # All `required: false`, for apply.yml's reason: `summary` binds `shipmate-engine` and the
+      # cells bind `<env>-plan`, so a caller has no environment-scoped secret to pass and a required
+      # declaration rejects the call. The App key lives only on `shipmate-engine`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_ENCRYPTION_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }

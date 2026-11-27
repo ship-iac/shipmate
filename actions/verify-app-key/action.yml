@@ -1,5 +1,5 @@
 name: shipmate verify-app-key
-description: Fail the job, naming the likely cause, when the shipmate App id or private key did not arrive. Runs before every App-token mint except comment-ops, whose mints answer a failure with a pull request comment instead; the mint action's own error names no cause.
+description: Fail the job, naming the likely cause, when the shipmate App id or private key did not arrive. Runs before the first App-token mint of every job except comment-ops, which answers a failed mint with a pull request comment, and base-push-plan, a display-only re-plan that warns on an empty token. auto-dispatch runs it only with `deferred-to`; otherwise its caller `summary` already did. The mint action's own error names no cause.
 inputs:
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).

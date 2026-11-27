@@ -24,7 +24,9 @@ Bumping it needs, per new level N:
 - the same two slots in the `detect` job `outputs:` of .github/workflows/apply-run.yml
   and .github/workflows/deploy.yml, and an `envlevelN` job in each, named `L<N>`;
 - an `envlevelN-waves` input on apply-run.yml's `summary` step and on
-  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line.
+  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line;
+- a `first_level == 'N'` selector in apply-run.yml's `waves-json` of `lock`'s `verify` and
+  `snap` steps and `unflip`'s `resnap` step, and in `unflip`'s `if:`.
 
 A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
 It runs nothing on import -- it only defines functions and constants.
