@@ -38,7 +38,7 @@ after a cell pending in another environment waits (`waves.waiting_cells`): it st
 pending, `waiting_cells` names it, and the rest apply. A cell another pull request
 holds a cell lock on stays pending the same way, named in `held_cells` (both forms),
 and the cells that run after it wait. Before any of that, the
-PR's review decision — read server-side by the `review` job, narrowed by
+PR's review decision — read server-side by this job's own pull-request read, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
 
@@ -97,6 +97,11 @@ _sleep = time.sleep
 #: p90 141 s; longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
 PLAN_WAIT = 480
 PLAN_POLL = 30
+#: Probed on one apply run, 35 reads about 3 s apart (2026-11-26): its status changes made a counted
+#: listing advertise a run it did not return, each for one read, so `PLAN_RELIST` re-lists past
+#: it. `PLAN_RELISTS` is a chosen bound on the extra listings per wait, not a measured one.
+PLAN_RELIST = 3
+PLAN_RELISTS = 5
 #: Seconds a wait that waited on a run sleeps before the checks are read: a check-run listing can
 #: lag its write by about a second, so a check the last waited run created may not list yet.
 PLAN_SETTLE = 5
@@ -587,10 +592,16 @@ def wait_for_plans(repo, pr_number):
     wait that waited on a run sleeps `PLAN_SETTLE` seconds before it returns.
 
     An unsettled poll sleeps `PLAN_POLL` seconds and polls again until `PLAN_WAIT` seconds of
-    `_clock` have passed since the first, then refuses (`_wait_refusal`). The deadline is checked
-    between polls: a read that stalls is not bounded by it."""
+    `_clock` have passed since the first, then refuses (`_wait_refusal`). A poll whose listing is
+    incomplete and that found no run live and none unread sleeps `PLAN_RELIST` seconds instead,
+    for the first `PLAN_RELISTS` such polls of this call; a poll with a live or unread run spends
+    none of them. Any incomplete listing qualifies, by design: a count mismatch, a failed or
+    malformed page, or a listing past its page cap. No sleep runs past the deadline, so the last
+    poll falls at it. The deadline is checked between polls: a read that stalls is not bounded
+    by it."""
     deadline = _clock() + PLAN_WAIT
     waited = set()
+    relists = 0
     while True:
         complete, live, unread = _poll_plans(repo, pr_number, waited)
         if complete and not live and not unread:
@@ -599,7 +610,11 @@ def wait_for_plans(repo, pr_number):
             return waited
         if _clock() >= deadline:
             raise _wait_refusal(pr_number, complete, live, unread)
-        sleep(PLAN_POLL)
+        interval = PLAN_POLL
+        if not complete and not live and not unread and relists < PLAN_RELISTS:
+            relists += 1
+            interval = PLAN_RELIST
+        sleep(min(interval, max(0, deadline - _clock())))
 
 
 def _poll_plans(repo, pr_number, waited):
@@ -719,14 +734,14 @@ def validate_env(value):
 
 def refuse_undetermined(decision):
     """Fail on a review decision `authorize._review_reason` neither passes nor refuses by rule
-    (`authorize.RULE_DECISIONS`), as plain `SystemExit`: it never arrived or has an unknown
-    value, an engine fault rather than a rule, so it is no `Refused` (a failed review read fails
-    the `review` job before this runs)."""
+    (`authorize.RULE_DECISIONS`), as plain `SystemExit`: an unknown value from GitHub, an engine
+    fault rather than a rule, so it is no `Refused` (a failed pull-request read fails `detect`'s
+    `pr` step before this runs)."""
     if decision not in az.RULE_DECISIONS and az._review_reason(decision):
         raise SystemExit(
             f"::error::not authorized: could not determine the PR's review decision "
-            f"(got {decision!r}); the apply run's `review` job passed `detect` no decision this "
-            "engine knows; check the pinned engine version, then retry."
+            f"(got {decision!r}); GitHub returned a review decision this engine does not know; "
+            "check the pinned engine version, then retry."
         )
 
 
@@ -734,7 +749,7 @@ def refuse_unreviewed(env, table, decision):
     """Refuse a targeted apply the PR's review decision does not authorize.
 
     The same `authorize._review_reason` comment-ops evaluated, re-run against the
-    decision the `review` job read server-side: comment-ops decided on the state
+    decision `detect` read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
     The run dies before any wave, the apply checks stay pending, and the gate stays
     pending with them. An undetermined decision fails first (`refuse_undetermined`); every
@@ -1169,9 +1184,16 @@ def bare_main(auto=False):
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         **auto_outputs,
     )
+
+
+def first_level(per_level):
+    """The lowest env-level of `per_level` with a cell in any wave, as `'0'`..`'3'`; `''` when
+    none has one. `apply-run.yml`'s `lock` snapshots and releases that level's wave0."""
+    return next((str(n) for n, waves in enumerate(per_level) if any(waves.values())), "")
 
 
 def main():
@@ -1252,6 +1274,7 @@ def main():
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
+        first_level=first_level(per_level),
         head_sha=head,
         base_sha=base_sha,
     )

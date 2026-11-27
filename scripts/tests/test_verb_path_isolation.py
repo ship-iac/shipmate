@@ -29,7 +29,8 @@ Pinned on the unlock side:
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
-  that env. The apply path gets this refusal from apply-env-level's `snapshot` job.
+  that env. The apply path gets this refusal from apply-run's `lock` job for the first populated
+  env-level and from apply-env-level's `snapshot` job for the others.
 - `detect`'s and `unlock`'s `permissions`, whole, keyed by job id. The consumer's `unlock` job
   grants `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the
   pull request's HCL.
@@ -77,15 +78,17 @@ UNLOCK_INPUTS = {
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {
-    APPLY: {"guard", "admit", "run", "outcome"},
+    APPLY: {"guard", "run", "queue", "outcome"},
     APPLY_RUN: {
         "review",
+        "waiters",
         "detect",
         "lock",
         "envlevel0",
         "envlevel1",
         "envlevel2",
         "envlevel3",
+        "unflip",
         "summary",
     },
 }
@@ -147,23 +150,23 @@ REACHED_WORKFLOWS = {
 }
 
 #: The whole `if:` of each `envlevel*` job. The mode clause went with the input, and it must not
-#: come back as a verb clause either.
+#: come back as a verb clause either. `lock` skipped, as for a `taken` run, stops every level.
 ENVLEVEL_IF = {
     "envlevel0": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel1": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel2": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
     "envlevel3": (
         "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
     ),
 }
 
@@ -259,7 +262,8 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
     """Each level's whole `if:`, the cancel guard included: without it a level runs after a
     cancelled predecessor and applies out of `needs` order.
 
-    Mutation: drop the cancel guard from `envlevel2`'s `if:` -- red."""
+    Mutations: drop the cancel guard from `envlevel2`'s `if:` -- red; drop
+    `needs.lock.result == 'success'` from it -- red."""
     got = {job_id: _job(APPLY_RUN, job_id).get("if") for job_id in ENVLEVEL_IF}
     assert got == ENVLEVEL_IF, (
         f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "
@@ -268,19 +272,19 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
 
 
 def test_every_summary_step_runs_on_every_apply_dispatch():
-    """A gate refresh that finds a hold once every check is done, or hits an API error, fails
-    its step; the result comment and the run check's finish still run, and so do the downloads
-    and the warning the comment reads. Mutations: delete the comment step's `if:` (the default
-    `success()` skips it) -- red; delete the run check's finish step's `if:` -- red; drop
-    `!cancelled()` from a download or the warning -- red."""
+    """A failed result comment still refreshes the gate, and a gate refresh that finds a hold
+    once every check is done, or hits an API error, fails its step and the run check's finish
+    still runs. Mutations: delete the gate step's `if:` (the default `success()` skips it) --
+    red; delete the run check's finish step's `if:` -- red; drop `!cancelled()` from a download
+    or the warning -- red."""
     steps = _job(APPLY_RUN, "summary")["steps"]
     assert len(steps) == 6, f"summary no longer has exactly six steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
     assert conditions == [
-        None,
         "${{ !cancelled() }}",
         "${{ !cancelled() && needs.detect.outputs.report_artifact != '' }}",
         "${{ !cancelled() && steps.download.outcome == 'failure' }}",
+        "${{ !cancelled() }}",
         "${{ !cancelled() }}",
         "${{ always() && steps.result.outputs.posted == 'true' }}",
     ], (

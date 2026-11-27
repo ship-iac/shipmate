@@ -9,7 +9,7 @@ inputs:
     required: false
     default: ""
   auto:
-    description: "`true` for an auto apply, which posts no reply."
+    description: "`true` for an auto apply, whose reply holds only the runs it cancelled."
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).

@@ -3,7 +3,7 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, load_script, run_with_gate_gh, step_by
+from _loader import ACTIONS, action_yaml, bash_only, load_script, run_with_gate_gh, step_by
 
 apply_snapshot = load_script("apply-snapshot")
 apply_complete = load_script("apply-complete")
@@ -222,27 +222,21 @@ def test_a_failed_listing_fails_the_snapshot_step(
 ):
     """An empty wave set needs no check, so the listing is the step's only way to fail; the
     `listed` case is the control. Mutations: delete the failed listing's `exit 1` -> `failed`
-    exits 0; delete its `::error::` line -> `failed` prints nothing on stdout."""
-    env = {
-        **os.environ,
-        "GH_TOKEN": "x",
-        "HEAD_SHA": _HEAD,
-        "SHIPMATE_WAVES_JSON": "{}",
-        "SHIPMATE_APP_ID": str(APP_ID),
-        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-snapshot"),
-        "GITHUB_REPOSITORY": "acme/demo",
-        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
-        "RUNNER_TEMP": str(tmp_path),
-    }
+    exits 0; delete its `::error::` line -> `failed` prints nothing on stdout; pass `--counted`
+    whatever `COUNTED` holds -> the counted page call is sent; delete its `refusal=` line ->
+    `failed` writes no refusal, which lets `unflip` run over a run that flipped nothing."""
     proc, calls = run_with_gate_gh(
         tmp_path,
         step_by("apply-snapshot", id="snap")["run"],
-        env,
+        _snap_env(tmp_path, "false"),
         sha=_HEAD,
         checks_rc=checks_rc,
         checks_jq=".check_runs[]",
     )
     assert (proc.returncode, proc.stdout) == (expected_rc, expected_stdout), proc.stderr
+    written = (tmp_path / "out.txt").read_text(encoding="utf-8")
+    refused = "refusal=" + expected_stdout.removeprefix("::error::")
+    assert written == ("by_wave={}\n" if checks_rc == 0 else refused)
     assert calls == [
         [
             "api",
@@ -252,6 +246,93 @@ def test_a_failed_listing_fails_the_snapshot_step(
             ".check_runs[]",
         ]
     ]
+
+
+@bash_only
+def test_counted_true_lists_through_the_counted_pages(tmp_path):
+    """The stub answers no page call, so the counted listing fails the step. Mutation: drop the
+    `flag=(--counted)` branch -> the `--paginate` listing is sent and the step passes."""
+    proc, calls = run_with_gate_gh(
+        tmp_path,
+        step_by("apply-snapshot", id="snap")["run"],
+        _snap_env(tmp_path, "true"),
+        sha=_HEAD,
+        checks_jq=".check_runs[]",
+    )
+    assert (proc.returncode, proc.stdout) == (1, _LISTING_FAILED), proc.stderr
+    assert calls == [
+        ["api", f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100&page=1"]
+    ]
+
+
+@bash_only
+def test_a_script_refusal_writes_the_refusal_output(tmp_path):
+    """A cell with no check refuses through the step and writes its text as `refusal`, which
+    `lock` folds into its own. Mutation: drop `refusal_output=True` from the script's
+    `run_annotated` -> no output written."""
+    env = {
+        **_snap_env(tmp_path, "false"),
+        "SHIPMATE_WAVES_JSON": json.dumps({"wave1": WAVES["wave1"]}),
+    }
+    proc, _ = run_with_gate_gh(
+        tmp_path,
+        step_by("apply-snapshot", id="snap")["run"],
+        env,
+        sha=_HEAD,
+        checks_jq=".check_runs[]",
+    )
+    assert proc.returncode == 1, proc.stderr
+    written = (tmp_path / "out.txt").read_text(encoding="utf-8")
+    assert written == "refusal=" + _NONE_APP.removeprefix("::error::") + "\n"
+
+
+def test_the_action_declares_exactly_these_outputs():
+    """Mutation: delete the `refusal` output -> red."""
+    assert action_yaml(ACTIONS / "apply-snapshot" / "action.yml")["outputs"] == {
+        "by_wave": {
+            "description": (
+                "JSON object mapping each wave key of `waves-json` to the pre-existing "
+                "apply-check ids of that wave's cells; `{}` for an empty wave."
+            ),
+            "value": "${{ steps.snap.outputs.by_wave }}",
+        },
+        "refusal": {
+            "description": (
+                "The first error of the `::error::` message that failed the step, without the "
+                "prefix, its lines joined into one; empty when the step raised none. Set although "
+                "the step fails. Branch-controlled text (it can name a stack path), so a reader "
+                "passes it through `env:`."
+            ),
+            "value": "${{ steps.snap.outputs.refusal }}",
+        },
+    }
+
+
+def test_counted_defaults_to_false():
+    """Mutation: default `counted` to `"true"` -> every caller that omits it lists counted."""
+    inputs = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")["inputs"]
+    assert inputs["counted"] == {
+        "description": (
+            '"true" refuses a check-run listing that holds fewer rows than its total_count.'
+        ),
+        "required": False,
+        "default": "false",
+    }
+
+
+def _snap_env(tmp_path, counted):
+    return {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "HEAD_SHA": _HEAD,
+        "SHIPMATE_WAVES_JSON": "{}",
+        "SHIPMATE_APP_ID": str(APP_ID),
+        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-snapshot"),
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        "RUNNER_TEMP": str(tmp_path),
+        "COUNTED": counted,
+    }
 
 
 _EIGHT_WAVES = {

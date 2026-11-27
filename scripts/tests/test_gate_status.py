@@ -572,6 +572,23 @@ def test_checks_keeps_a_retry_notice_off_its_stdout(in_process, monkeypatch, cap
     assert (len(calls), in_process) == (2, [2])
 
 
+def test_checks_counted_lists_through_the_counted_pages(in_process, monkeypatch, capsys):
+    """Mutations: drop the `--counted` branch in `main` -> the usage refusal; pass
+    `counted=False` from it -> the `--paginate` argv is sent."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return json.dumps({"total_count": 1, "check_runs": [{"id": 7}]})
+
+    monkeypatch.setattr(gs, "run", run)
+    gs.main(["checks", SHA, ".check_runs[]", "--counted"])
+    assert capsys.readouterr() == ('{"id": 7}\n', "")
+    assert calls == [
+        ["gh", "api", f"repos/acme/demo/commits/{SHA}/check-runs?filter=all&per_page=100&page=1"]
+    ]
+
+
 _POST = ["gh", *_status_argv("pending", "the reason")]
 _READ = ["gh", *STATUSES_ARGV]
 _USER = ["gh", *USER_ARGV]

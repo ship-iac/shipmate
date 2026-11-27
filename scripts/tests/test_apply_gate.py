@@ -38,9 +38,10 @@ def test_the_cell_names_are_these_whole_values():
     assert ag.parse_check_name("apply / dev-eu / stacks/app") == ("stacks/app", "dev-eu")
     assert ag.parse_check_name("apply / dev / stacks/a / x") == ("stacks/a / x", "dev")
     assert ag.plan_check_name("stacks/app", "dev-eu") == "plan / dev-eu / stacks/app"
-    assert (ag.PRE_APPLY_STEP, ag.APPLY_STEP, ag.HELD_TITLE) == (
+    assert (ag.PRE_APPLY_STEP, ag.APPLY_STEP, ag.STATE_STEP, ag.HELD_TITLE) == (
         "Pre-apply check",
         "Apply the cell",
+        "Save the cell's state",
         "State not saved",
     )
 
@@ -94,7 +95,7 @@ def test_cell_part_reads_these_literal_names(job_name, stack, env, expected):
 _LEVELED = [
     {"id": 1, "name": "apply / run / L0 / dev-eu / stacks/app / apply"},
     {"id": 2, "name": "apply / run / L0 / dev-eu / stacks/app / save"},
-    {"id": 3, "name": "apply / run / L1 / wave0-complete"},
+    {"id": 3, "name": "apply / run / L1 / complete"},
     {"id": 4, "name": "apply / run / L1 / dev-eu / stacks/app / apply"},
     {"id": 5, "name": "apply / run / L0 / dev-us / stacks/app / save"},
 ]
@@ -298,6 +299,90 @@ def test_a_refused_or_skipped_apply_step_reads_not_applied(steps, applied):
     applied."""
     row = {**_RR_APPLY_1, "steps": steps}
     assert ag.attempts([row], "stacks/app", "dev-eu") == {1: {"applied": applied, "saved": None}}
+
+
+def test_an_apply_refused_by_its_key_step_reads_not_applied():
+    """The key refusal is `apply`'s first step: it fails and both later steps skip. An unknown
+    verdict would hold the check as a lost state. Mutation: drop the skipped `Apply the cell`
+    clause -- reads applied, red."""
+    refused = [
+        _step("Set up job", "success"),
+        _step("Refuse an apply job that holds the App key", "failure"),
+        _step("Pre-apply check", "skipped"),
+        _step("Apply the cell", "skipped"),
+        _step("Complete job", "success"),
+    ]
+    row = {**_RR_APPLY_1, "conclusion": "failure", "steps": refused}
+    assert ag.attempts([row], "stacks/app", "dev-eu") == {1: {"applied": False, "saved": None}}
+    assert ag.unsaved([row], "stacks/app", "dev-eu") == []
+
+
+def _save(conclusion, *steps):
+    """A `save` row shaped as the `filter=all` listing returns it, around `steps`."""
+    return {**_RR_SAVE_1, "conclusion": conclusion, "steps": list(steps)}
+
+
+_CACHE_SAVE = "Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+_WRITE_STEP = "Complete this cell's apply check"
+
+
+@pytest.mark.parametrize(
+    ("save", "saved"),
+    [
+        pytest.param(
+            _save(
+                "failure",
+                _step("Set up job", "success"),
+                _step("Save the cell's state", "success"),
+                _step(_WRITE_STEP, "failure"),
+                _step("Complete job", "success"),
+            ),
+            True,
+            id="state-ok-write-failed",
+        ),
+        pytest.param(
+            _save(
+                "failure",
+                _step("Set up job", "success"),
+                _step("Save the cell's state", "failure"),
+                _step(_WRITE_STEP, "skipped"),
+                _step("Complete job", "success"),
+            ),
+            False,
+            id="state-failed",
+        ),
+        pytest.param(_save("failure"), False, id="lost-runner-no-steps"),
+        pytest.param(
+            _save(
+                "success",
+                _step("Set up job", "success"),
+                _step(_CACHE_SAVE, "success"),
+                _step("Complete job", "success"),
+            ),
+            True,
+            id="job-success-without-the-step",
+        ),
+        pytest.param(
+            _save(
+                "failure",
+                _step("Set up job", "success"),
+                _step("Save the cell's state extra", "success"),
+                _step("Save the cell's state", "failure"),
+                _step("Complete job", "success"),
+            ),
+            False,
+            id="only-a-longer-name-succeeded",
+        ),
+    ],
+)
+def test_a_save_reads_saved_from_its_state_step_or_its_job(save, saved):
+    """Raw-shaped rows of a `filter=all` listing, an applied attempt 1. Mutations: drop the
+    step clause of `state_safe` (state-ok-write-failed reads unsaved); match the step by
+    prefix (only-a-longer-name-succeeded reads saved); drop the job-success clause
+    (job-success-without-the-step reads unsaved)."""
+    jobs = [_RR_APPLY_1, save]
+    assert ag.attempts(jobs, "stacks/app", "dev-eu") == {1: {"applied": True, "saved": saved}}
+    assert ag.unsaved(jobs, "stacks/app", "dev-eu") == ([] if saved else [1])
 
 
 @pytest.mark.parametrize(

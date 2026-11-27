@@ -8,9 +8,9 @@ on:
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
       SHIPMATE_ENCRYPTION_KEY: { required: false }
-      # Feeds the `summary` job's App-token mints for the gate write and the lock release, and the
-      # `replan` job's. An empty key fails loud in each `summary` mint's `Verify the App key
-      # arrived`, before the mint; the re-plan only warns.
+      # Reaches `summary`, `replan` and, via the env-level calls, snapshot, releases, `complete`
+      # and `save`. An empty key first fails `Verify the App key arrived` in snapshot, or in
+      # `summary` with no cells; the re-plan only warns. A cell's `apply` refuses a non-empty one.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 jobs:

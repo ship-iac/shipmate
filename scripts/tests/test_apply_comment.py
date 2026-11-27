@@ -301,6 +301,37 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     )
 
 
+def test_a_cell_whose_save_failed_its_check_write_reads_applied_and_its_successor_retries():
+    """`stacks/dns` applied and its `save` state step succeeded, but the check write failed:
+    `save` is red, the wave failed, so the next wave's `stacks/app` never ran, and the level's
+    `complete` wrote the dns check `success`. The comment shows dns applied, app not attempted,
+    and the retry, which applies only the pending app cell.
+
+    Mutation: `name in done` for `name not in done` in `apply_check_state` -- dns reads
+    `not recorded` and the comment prescribes a re-plan, red."""
+    expected = {("dev-eu", "stacks/dns"), ("dev-eu", "stacks/app")}
+    rows = ac.build_rows(expected, [(_cell(stack="stacks/dns"), _APPLIED)])
+    dns, app = "apply / dev-eu / stacks/dns", "apply / dev-eu / stacks/app"
+    ac.apply_check_state(rows, {dns, app}, {dns}, set())
+    jobs = [
+        _job("apply / run / L0 / dev-eu / stacks/dns / apply", "https://gh/job/dns-apply"),
+        _job("apply / run / L0 / dev-eu / stacks/dns / save", "https://gh/job/dns-save"),
+    ]
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "failure", head_sha=SHA)
+    assert body == (
+        "### shipmate apply\n\n"
+        f"🔴 failed, 1 not attempted, 1 applied {AT}\n\n"
+        "#### dev-eu: 2 cells, 1 not attempted, 1 applied\n\n"
+        '<details><summary>🟢 stacks/dns: +1 ~0 -0 <a href="https://gh/job/dns-apply">logs</a>'
+        f"</summary>\n\n```\n{_APPLIED}\n```\n</details>\n\n"
+        '🟡 stacks/app: not attempted <a href="https://gh/run/1">logs</a>\n\n'
+        "not attempted: the apply checks stay pending; retry with `shipmate apply`."
+        + _LOST_POINTER
+        + "\n\n"
+        + HINT
+    )
+
+
 def test_a_failed_and_an_applied_cell_lead_a_not_attempted_one():
     """`stacks/a` sorts first by name; not attempted, it follows the rows that ran.
 

@@ -822,7 +822,7 @@ def test_an_invalid_environment_name_writes_no_refused_by_rule(monkeypatch, tmp_
 
 def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path):
     """The default in `os.environ.get("SHIPMATE_REVIEW_DECISION", "")` is the whole fail-closed
-    behaviour when the review job's output never reaches the action. Every other main() test
+    behaviour when `detect`'s `pr` step output never reaches the action. Every other main() test
     sets the variable, so without this case the default could be flipped to "APPROVED"
     unnoticed."""
     _apply_env(monkeypatch, tmp_path)
@@ -934,10 +934,10 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `head_sha` and `base_sha`, and the report file holds exactly the targeted
-    form's four fields: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a
-    targeted apply is env-level 0 alone, so levels 1-3 must say `true` or apply-run.yml runs them
-    into `fromJSON('')`.
+    `envlevelN_empty`, `first_level`, `head_sha` and `base_sha`, and the report file holds
+    exactly the targeted form's four fields: `review_not_required_envs`, `waiting_cells`,
+    `held_cells` and `env_order`; a targeted apply is env-level 0 alone, so levels 1-3 must say
+    `true` or apply-run.yml runs them into `fromJSON('')`.
 
     Mutation: drop `held_cells` from `main`'s report -- red.
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
@@ -967,6 +967,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "envlevel2_empty=true\n"
         f"envlevel3_waves={empty}\n"
         "envlevel3_empty=true\n"
+        "first_level=0\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "base_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
     )
@@ -977,6 +978,19 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "env_order": ["dev-eu"],
         "complete": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("populated", "expected"),
+    [({0}, "0"), ({0, 2}, "0"), ({1, 3}, "1"), (set(), "")],
+    ids=["0", "0-2", "1-3", "none"],
+)
+def test_the_first_level_is_the_lowest_populated_one(populated, expected):
+    """`lock` snapshots and releases this level for its call. Mutation: `first_level` always
+    `'0'` -- red on 1-3 and none."""
+    cell = {"stack": "s", "environment": "e"}
+    per_level = [{"wave0": [cell] if n in populated else [], "wave1": []} for n in range(4)]
+    assert ad.first_level(per_level) == expected
 
 
 def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
@@ -2007,21 +2021,93 @@ def test_the_deadline_refusal_names_the_lowest_live_run(monkeypatch, tmp_path):
 
 
 def test_an_incomplete_listing_polls_again(monkeypatch, tmp_path):
-    """Mutation: refuse on the first incomplete listing."""
+    """Mutations: sleep `PLAN_POLL` after every unsettled poll (`[30]`); settle on an
+    incomplete, empty listing (no sleep)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], "failed"), ([], True)])
     ad.main()
     assert _applied_cells(out) == ["stacks/app"]
-    assert clock.sleeps == [30]
+    assert clock.sleeps == [3]
+
+
+def _wait(monkeypatch, tmp_path, polls, reads=None):
+    """`wait_for_plans` called directly over `plan_polls`: `(waited set, clock)`."""
+    _, clock, _ = _waiting(monkeypatch, tmp_path, polls, reads)
+    return ad.wait_for_plans("acme/iac", PR_NUMBER), clock
+
+
+def test_an_incomplete_empty_listing_relists_soon(monkeypatch, tmp_path):
+    """Mutation: sleep `PLAN_POLL` after every unsettled poll (`[30]`)."""
+    waited, clock = _wait(monkeypatch, tmp_path, [([], "short"), ([], True)])
+    assert waited == set()
+    assert clock.sleeps == [3]
+
+
+def test_the_short_relists_are_bounded(monkeypatch, tmp_path):
+    """Seven incomplete, empty listings. Mutations: drop the `relists < PLAN_RELISTS` bound
+    (seven 3s); bound 6 (six 3s)."""
+    waited, clock = _wait(monkeypatch, tmp_path, [([], "short")] * 7 + [([], True)])
+    assert waited == set()
+    assert clock.sleeps == [3, 3, 3, 3, 3, 30, 30]
+
+
+def test_an_incomplete_listing_with_a_live_run_polls_at_the_long_interval(monkeypatch, tmp_path):
+    """Run 9 is listed on an incomplete listing, then reads `completed` by id under an
+    incomplete, empty one. Mutation: drop `not live` from the short-sleep test (`[3, 3, 5]`)."""
+    waited, clock = _wait(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], "short"), ([], "short"), ([], True)],
+        {9: ["completed"]},
+    )
+    assert waited == {"9"}
+    assert clock.sleeps == [30, 3, 5]
+
+
+def test_an_incomplete_listing_with_an_unread_run_polls_at_the_long_interval(monkeypatch, tmp_path):
+    """Run 9 drops off an incomplete listing and its by-id read fails once. Mutation: drop
+    `not unread` from the short-sleep test (`[30, 3, 5]`)."""
+    waited, clock = _wait(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], True), ([], "short"), ([], True)],
+        {9: [GH_FAILED, "completed"]},
+    )
+    assert waited == {"9"}
+    assert clock.sleeps == [30, 30, 5]
+
+
+def test_only_incomplete_empty_listings_spend_the_short_relists(monkeypatch, tmp_path):
+    """Polls: incomplete-empty, run 9 live, incomplete-empty x4, 9 unread, incomplete-empty x2,
+    complete. Mutations: count every unsettled poll against the bound (`[3, 30, 3, 3, 3, 30,
+    ...]`); reset the count after a live poll (a 3 after the unread poll). The final 5 is
+    `PLAN_SETTLE`: run 9 was waited for."""
+    polls = [([], "short"), ([_LIVE_9], "short")] + [([], "short")] * 7 + [([], True)]
+    reads = {9: ["completed"] * 4 + [GH_FAILED, "completed"]}
+    waited, clock = _wait(monkeypatch, tmp_path, polls, reads)
+    assert waited == {"9"}
+    assert clock.sleeps == [3, 30, 3, 3, 3, 3, 30, 30, 30, 5]
+
+
+def test_each_wait_gets_its_own_short_relists(monkeypatch, tmp_path):
+    """Two waits in one process, each over five incomplete, empty listings. Mutation: keep the
+    count in a module global (the second wait sleeps 30s)."""
+    polls = ([([], "short")] * 5 + [([], True)]) * 2
+    first, clock = _wait(monkeypatch, tmp_path, polls)
+    second = ad.wait_for_plans("acme/iac", PR_NUMBER)
+    assert (first, second) == (set(), set())
+    assert clock.sleeps == [3] * 10
 
 
 @pytest.mark.parametrize("complete", ["failed", "short"])
 def test_a_listing_incomplete_until_the_deadline_fails(monkeypatch, tmp_path, complete):
-    """A failed read, or a page whose `total_count` exceeds its runs, on every poll. Mutations:
-    treat `complete` false as an empty listing (the cell applies); pass `counted=False` (short
-    applies)."""
+    """A failed read, or a page whose `total_count` exceeds its runs, on every poll: five
+    `PLAN_RELIST` sleeps, then `PLAN_POLL` ones cut to the deadline, 480 seconds in all.
+    Mutations: treat `complete` false as an empty listing (the cell applies); pass
+    `counted=False` (short applies); settle on an incomplete, empty listing (the cell applies);
+    drop the deadline cap on the sleep (sixteen 30s, 495 seconds)."""
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([], complete)])
     assert _refused(out) == f"refusal={_UNLISTED}\n"
-    assert clock.sleeps == [30] * 16
+    assert clock.sleeps == [3] * 5 + [30] * 15 + [15]
 
 
 def test_a_listing_incomplete_after_a_live_one_fails_at_the_deadline(monkeypatch, tmp_path):

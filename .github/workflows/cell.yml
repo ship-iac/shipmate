@@ -16,11 +16,16 @@ on:
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }
       deploy: { required: false, type: boolean, default: false }
-    # No App key: the cell writes no check.
+      # The level's by_wave, unparsed: an expression lookup ignores case, so `save` finds this
+      # cell's check ids by exact name.
+      by_wave: { required: true, type: string }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
       SHIPMATE_SECRETS:
+        required: false
+      # `save` completes the cell's check with it; `apply` refuses when it arrives there.
+      SHIPMATE_APP_PRIVATE_KEY:
         required: false
 # Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
 # id-token: write.
@@ -40,7 +45,19 @@ jobs:
     environment: ${{ fromJSON(inputs.cell).env_binding }}
     outputs:
       state: ${{ steps.cell.outputs.state }}
+      job_id: ${{ job.check_run_id }}
     steps:
+      # A key that reaches this job, from its environment or a repository or organization
+      # secret, would sit beside pull-request code. First, so nothing runs beside it.
+      - name: Refuse an apply job that holds the App key
+        env:
+          KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          BINDING: ${{ fromJSON(inputs.cell).env_binding }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "::error::SHIPMATE_APP_PRIVATE_KEY reaches pull-request code in this apply job: the environment $BINDING, or a repository or organization secret, holds it; delete it there and keep the key only on shipmate-engine"
+            exit 1
+          fi
       # Every attempt: an approval wait can last hours and a failed-jobs re-run skips `detect` and
       # `lock`. A failure skips the credentials and apply-cell only refuses. apply-gate reads this
       # step's name and `Apply the cell`'s (PRE_APPLY_STEP, APPLY_STEP): keep them in step.
@@ -89,19 +106,37 @@ jobs:
           pre-apply-outcome: ${{ steps.pre-apply.outcome }}
           pre-apply-refusal: ${{ steps.pre-apply.outputs.refusal }}
 
-  # No pull-request code, environment or secret. The only writer of the cell's state entry, it runs
-  # however `apply` ended, since a cancelled or failed apply may have changed the state. Same
-  # runner as `apply`: a cache entry's version includes its compression method.
+  # No pull-request code. The only writer of the cell's state entry, it runs however `apply` ended,
+  # since a cancelled or failed apply may have changed the state. Same runner as `apply`: a cache
+  # entry's version includes its compression method.
   save:
     needs: [apply]
     if: ${{ always() }}
     runs-on: ${{ inputs.runs_on }}
     cache-mode: write
     permissions: { actions: read }
+    # For the App key, which only the completion step reads, after the state is saved.
+    environment: { name: shipmate-engine, deployment: false }
     steps:
-      - uses: $/actions/state-save
+      # apply-gate reads this step's name (STATE_STEP): keep them in step.
+      - name: Save the cell's state
+        uses: $/actions/state-save
         with:
           job-id: ${{ job.check_run_id }}
           stack: ${{ inputs.stack }}
           environment: ${{ inputs.environment }}
           state: ${{ needs.apply.outputs.state }}
+      # Runs only after the state step succeeded. A failed write fails `save`, so the wave fails
+      # and the level's `complete` writes the check.
+      - name: Complete this cell's apply check
+        if: ${{ needs.apply.result == 'success' }}
+        uses: $/actions/cell-complete
+        with:
+          by-wave: ${{ inputs.by_wave }}
+          stack: ${{ inputs.stack }}
+          environment: ${{ inputs.environment }}
+          apply-job-id: ${{ needs.apply.outputs.job_id }}
+          deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

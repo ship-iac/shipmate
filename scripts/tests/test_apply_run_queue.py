@@ -9,8 +9,9 @@ compared whole against a hand-written constant.
 import re
 
 from _loader import ENGINE, action_yaml, workflow_jobs, workflow_yaml
+from test_apply_dispatch_actor_guard import CHECK_STEP_COUNT, FENCE_IF, RUN_IF
 
-#: The whole top-level `concurrency:` of `apply-run.yml`. `guard` refuses a non-canonical
+#: The whole top-level `concurrency:` of `apply-run.yml`. `run.if` refuses a non-canonical
 #: `pr_number` before the call, so the key needs no fallback.
 APPLY_RUN_CONCURRENCY = {
     "group": "shipmate-apply-${{ inputs.pr_number }}",
@@ -21,11 +22,7 @@ APPLY_RUN_CONCURRENCY = {
 #: The whole `run` job of `apply.yml`. `permissions` is the union `apply-run.yml`'s jobs request;
 #: `with` forwards every input; `secrets` names each one `apply-run.yml` declares.
 RUN_JOB = {
-    "needs": ["guard", "admit"],
-    "if": (
-        "${{ !cancelled() && needs.guard.result == 'success' && "
-        "(needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}"
-    ),
+    "if": RUN_IF,
     "uses": "./.github/workflows/apply-run.yml",
     "permissions": {
         "contents": "read",
@@ -52,6 +49,7 @@ RUN_JOB = {
 #: The whole `workflow_call.outputs` of `apply-run.yml`. Each reads empty when the call was
 #: cancelled while it waited in the queue, and a job's values read empty when it never ran.
 APPLY_RUN_OUTPUTS = {
+    "admitted": {"value": "${{ jobs.review.outputs.admitted }}"},
     "review_result": {"value": "${{ jobs.review.result }}"},
     "unbound": {"value": "${{ jobs.review.outputs.unbound }}"},
     "posted": {"value": "${{ jobs.summary.outputs.posted }}"},
@@ -71,15 +69,16 @@ APPLY_RUN_IGNORES = [
     r'property "result" is not defined in object type \{outputs: ',
     'unexpected key "cache-mode" for "job" section',
 ]
-#: actionlint 1.7.12's message for `jobs.review.result` in a `workflow_call` output, and for a
-#: misspelt property in the same place, copied from runs of the release binary.
+#: Copied from the actionlint 1.7.12 release binary, `-no-color -oneline`, empty config, piped:
+#: its message for `jobs.review.result` in a `workflow_call` output, and for that property
+#: misspelt `reslt` in a scratch copy of `apply-run.yml`.
 ACTIONLINT_RESULT_MESSAGE = (
-    'property "result" is not defined in object type {outputs: {decision: string; '
-    "unbound: string}} [expression]"
+    'property "result" is not defined in object type {outputs: {admitted: string; '
+    "decision: string; unbound: string}} [expression]"
 )
 ACTIONLINT_TYPO_MESSAGE = (
-    'property "reslt" is not defined in object type {outputs: {decision: string; '
-    "unbound: string}} [expression]"
+    'property "reslt" is not defined in object type {outputs: {admitted: string; '
+    "decision: string; unbound: string}} [expression]"
 )
 
 
@@ -89,8 +88,8 @@ def test_apply_run_queues_one_run_per_pull_request():
 
 
 def test_no_apply_yml_job_sits_in_a_concurrency_group():
-    """`guard` must refuse and `outcome` must answer while a run waits in the queue, so neither
-    joins a group; a group on `run` would queue the call a second time.
+    """`guard` must refuse and `queue` cancel stale runs while a run waits in the queue, so
+    neither joins a group; a group on `run` would queue the call a second time.
 
     Mutation: give `run` the group `shipmate-apply-${{ inputs.pr_number }}` -- red."""
     grouped = {j for j, job in workflow_jobs("apply.yml").items() if "concurrency" in job}
@@ -100,7 +99,7 @@ def test_no_apply_yml_job_sits_in_a_concurrency_group():
 
 def test_apply_run_exports_exactly_these_outputs():
     """Mutations: drop `jobs.lock.result == 'cancelled'` from `run_cancelled` -- red; read
-    `posted` from `jobs.review` -- red."""
+    `posted` from `jobs.review` -- red; drop `admitted` -- red."""
     assert workflow_yaml("apply-run.yml")["on"]["workflow_call"]["outputs"] == APPLY_RUN_OUTPUTS
 
 
@@ -116,53 +115,27 @@ def test_actionlint_ignores_only_result_and_cache_mode_in_apply_run():
 
 
 def test_the_run_job_is_this_whole_job():
-    """Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
-    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; drop
-    the `admitted` clause, and a `taken` run of a comment applies a second time -- red; key it on
-    `needs.admit.result == 'success'`, and a failed queue step stops the apply -- red; drop
-    `|| github.event.inputs.comment_id == ''`, and an `auto` run depends on `admit`'s outputs,
-    which a lost `admit` runner leaves empty -- red; drop `admit` from `needs`, and its outputs
-    read empty -- red."""
+    """No `needs`: the call starts at once, beside `queue`, and `review` claims the comment.
+
+    Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
+    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; add
+    `needs: [queue]` -- red."""
     assert workflow_jobs("apply.yml")["run"] == RUN_JOB
 
 
-#: The whole `admit` job of `apply.yml`. No job-token permission: its writes use the App token,
-#: and only under the trust rule `scripts/apply-queue` applies. `admitted` is `true` or unset.
-ADMIT_JOB = {
-    "needs": ["guard"],
-    "if": "${{ !cancelled() && needs.guard.result == 'success' }}",
+#: The whole `queue` job of `apply.yml`, its steps after `guard`'s six check steps, which
+#: `test_apply_dispatch_actor_guard.py` pins with the fence. No job-token permission: its writes
+#: use the App token, and only under the trust rule `scripts/apply-queue` applies. Display only:
+#: no job needs it, so a failure or a lost runner fails this job, not the run.
+QUEUE_JOB = {
+    "if": FENCE_IF,
     "runs-on": "ubuntu-slim",
     "environment": {"name": "shipmate-engine", "deployment": False},
     "permissions": {},
-    "outputs": {"admitted": "${{ steps.admit.outputs.admitted }}"},
+    "continue-on-error": True,
+    "timeout-minutes": 3,
     "steps": [
         {
-            "id": "claim",
-            "if": (
-                "${{ github.event_name == 'workflow_dispatch' && "
-                "github.event.inputs.comment_id != '' }}"
-            ),
-            "uses": "$/actions/claim",
-            "with": {
-                "verb": "apply",
-                "environment": "${{ inputs.environment }}",
-                "pr-number": "${{ inputs.pr_number }}",
-                "comment-id": "${{ github.event.inputs.comment_id }}",
-                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-            },
-        },
-        {
-            "id": "admit",
-            "if": (
-                "${{ steps.claim.outputs.state == 'owned' || "
-                "github.event.inputs.comment_id == '' }}"
-            ),
-            "run": 'echo "admitted=true" >> "$GITHUB_OUTPUT"',
-        },
-        {
-            "id": "queue",
-            "if": "${{ steps.admit.outputs.admitted == 'true' }}",
             "uses": "$/actions/apply-queue",
             "with": {
                 "pr-number": "${{ inputs.pr_number }}",
@@ -174,6 +147,37 @@ ADMIT_JOB = {
         },
     ],
 }
+
+#: `apply-run.yml` `review`'s claim and `admit` steps, whole, right after its six check steps.
+#: `admitted` is `true` or unset.
+CLAIM_STEPS = [
+    {
+        "id": "claim",
+        "if": (
+            "${{ github.event_name == 'workflow_dispatch' && "
+            "github.event.inputs.comment_id != '' }}"
+        ),
+        "uses": "$/actions/claim",
+        "with": {
+            "verb": "apply",
+            "environment": "${{ inputs.environment }}",
+            "pr-number": "${{ inputs.pr_number }}",
+            "comment-id": "${{ github.event.inputs.comment_id }}",
+            "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+            "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+        },
+    },
+    {
+        "id": "admit",
+        "if": "${{ steps.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '' }}",
+        "run": 'echo "admitted=true" >> "$GITHUB_OUTPUT"',
+    },
+]
+
+#: The `if:` of every `review` step after `admit`, in order: the key check, the token, `rd` and
+#: the running check's `start`. A `taken` run reads no key and writes nothing.
+ADMITTED = "${{ steps.admit.outputs.admitted == 'true' }}"
+GATED_STEP_IFS = [ADMITTED, ADMITTED, ADMITTED, ADMITTED]
 
 #: The step of `actions/apply-queue` that runs the script: the trust inputs come from the
 #: dispatch's own `github` context and the slug from the token mint.
@@ -188,19 +192,29 @@ QUEUE_STEP_ENV = {
 }
 
 
-def test_the_admit_job_is_this_whole_job():
-    """A guard refusal skips `admit`; a `taken` or failed claim writes no `admitted`; an `auto`
-    dispatch skips the claim step and is admitted by its empty `comment_id`. Mutations:
-    `permissions: { actions: write }` -- red; drop `needs.guard.result == 'success' &&` from
-    `admit.if`, and a guard refusal starts the claim, because `!cancelled()` drops the implicit
-    success of `needs: guard` -- red; drop the admit step's `if:` (admitted unconditionally, so a
-    `taken` claim applies) -- red; `!= 'owned'` in it -- red; drop its
-    `|| github.event.inputs.comment_id == ''` (no `auto` run is admitted) -- red; drop the queue
-    step's `if:` -- red; add `continue-on-error: true` to the queue step -- red; drop `auto`
-    from its `with` -- red; drop the claim step's `comment_id` clause -- red; pass
-    `github.event.inputs.pr_number` (unvalidated) as its `pr-number` -- red; drop `environment`
-    from its `with` -- red."""
-    assert workflow_jobs("apply.yml")["admit"] == ADMIT_JOB
+def test_the_queue_job_is_this_whole_job():
+    """Mutations: `permissions: { actions: write }` -- red; drop `continue-on-error` -- red;
+    drop `timeout-minutes` -- red; drop `auto` from the queue step's `with` -- red; pass
+    `github.event.inputs.pr_number` (unvalidated) as its `pr-number` -- red."""
+    job = workflow_jobs("apply.yml")["queue"]
+    assert {**job, "steps": job["steps"][CHECK_STEP_COUNT:]} == QUEUE_JOB
+
+
+def test_review_claims_the_comment_after_its_check_steps():
+    """A refused check step skips every later step; a `taken` or failed claim writes no
+    `admitted`; an `auto` dispatch skips the claim step and is admitted by its empty
+    `comment_id`. The admit step's `if:` carries no status function, so a failed check step
+    skips it. Mutations: prefix the admit step's `if:` with `always() && ` -- red; drop it
+    (admitted unconditionally, so a `taken` claim applies) -- red; `!= 'owned'` in it -- red;
+    drop the claim step's `comment_id` clause -- red."""
+    steps = workflow_jobs("apply-run.yml")["review"]["steps"]
+    assert steps[CHECK_STEP_COUNT : CHECK_STEP_COUNT + 2] == CLAIM_STEPS
+
+
+def test_every_review_step_after_the_claim_runs_only_for_the_owner():
+    """Mutations: drop the `if:` from the key check -- red; drop it from `rd` -- red."""
+    steps = workflow_jobs("apply-run.yml")["review"]["steps"]
+    assert [s.get("if") for s in steps[CHECK_STEP_COUNT + 2 :]] == GATED_STEP_IFS
 
 
 def test_the_queue_action_mints_these_permissions_and_passes_both_actors():

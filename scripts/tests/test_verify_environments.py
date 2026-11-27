@@ -19,7 +19,7 @@ import os
 import sys
 
 import pytest
-from _loader import ACTIONS, action_steps, bash_only, load_script, run_step
+from _loader import ACTIONS, action_steps, action_yaml, bash_only, load_script, run_step
 
 vf = load_script("verify-environments")
 
@@ -125,6 +125,7 @@ def _run_step(tmp_path, listing, waves_json, gh_exit=0):
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_ACTION_PATH": str(ACTIONS / "verify-environments"),
             "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
             "FAKE_LISTING": json.dumps(listing),
             "SHIPMATE_WAVES_JSON": waves_json,
             "PYTHON": sys.executable,
@@ -133,6 +134,12 @@ def _run_step(tmp_path, listing, waves_json, gh_exit=0):
         },
         timeout=60,
     )
+
+
+def _written(tmp_path):
+    """The step's `GITHUB_OUTPUT`, empty when it wrote none."""
+    path = tmp_path / "github_output"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
 def _out(proc):
@@ -146,11 +153,26 @@ def test_an_existing_apply_environment_passes(tmp_path):
     proc = _run_step(tmp_path, _listing(["dev-eu-plan", "dev-eu-apply"]), json.dumps(WAVES))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "::notice::" in _out(proc)
+    assert _written(tmp_path) == ""
+
+
+#: The refusal for missing `dev-eu-apply` and `prod-apply`, hand-written.
+_MISSING = (
+    "this apply would bind GitHub Environment(s) that do not exist: "
+    "dev-eu-apply, prod-apply. GitHub creates a missing environment on demand with no "
+    "reviewers, no wait timer and no deployment branch policy, so the apply would run "
+    "outside every control that environment is meant to carry. Two ways to fix it: "
+    "create each environment named above, or correct the environment's entry in "
+    "`.github/shipmate-config.yml` so the apply binds the environments you did create "
+    "(`split: false` binds the bare <env>, anything else binds <env>-apply)."
+)
 
 
 @bash_only
 def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp_path):
-    """Whole text on stderr, where SystemExit writes it: the action's own `echo` is stdout."""
+    """Whole text on stderr, where SystemExit writes it: the action's own `echo` is stdout. The
+    text is also the step's `refusal` output, which `lock` folds into its own. Mutation: drop
+    `refusal_output=True` from the script's `run_annotated` -> no output written."""
     waves = {
         "wave0": [
             {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
@@ -159,26 +181,28 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
     }
     proc = _run_step(tmp_path, _listing(["dev-eu-plan"]), json.dumps(waves))
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert proc.stderr == (
-        "::error::this apply would bind GitHub Environment(s) that do not exist: "
-        "dev-eu-apply, prod-apply. GitHub creates a missing environment on demand with no "
-        "reviewers, no wait timer and no deployment branch policy, so the apply would run "
-        "outside every control that environment is meant to carry. Two ways to fix it: "
-        "create each environment named above, or correct the environment's entry in "
-        "`.github/shipmate-config.yml` so the apply binds the environments you did create "
-        "(`split: false` binds the bare <env>, anything else binds <env>-apply).\n"
-    )
+    assert proc.stderr == f"::error::{_MISSING}\n"
+    assert _written(tmp_path) == f"refusal={_MISSING}\n"
+
+
+#: The action's own refusal for a listing that could not be read, hand-written. It must say a
+#: re-run clears a transient failure: a refusal that reads as a bug invites a fix that softens it.
+_UNLISTED = (
+    "could not list this repository's GitHub Environments, so the apply-path environment "
+    "pre-flight did not run; refusing to apply. A transient failure (a 5xx, a rate limit) clears "
+    "on a re-run of this workflow; a persistent 403 means the token cannot read environments."
+)
 
 
 @bash_only
 def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
+    """Mutation: delete the branch's `refusal=` line -> no output written."""
     proc = _run_step(tmp_path, _listing([]), json.dumps(WAVES), gh_exit=1)
-    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert "::error::" in _out(proc)
-    assert "re-run" in _out(proc), (
-        "a transient listing failure that reads as a bug gets 'fixed' by softening "
-        "this refusal -- the message must say a re-run clears it"
+    assert (proc.stdout, _written(tmp_path)) == (
+        f"::error::{_UNLISTED}\n",
+        f"refusal={_UNLISTED}\n",
     )
+    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
 
 @bash_only
@@ -266,3 +290,19 @@ def test_a_missing_environment_is_refused_before_an_unscoped_one(tmp_path):
         "apply binds the environments you did create (`split: false` binds the bare <env>, "
         "anything else binds <env>-apply).\n"
     )
+
+
+def test_the_action_declares_exactly_the_refusal_output():
+    """`lock` reads it to tell a pre-flight refusal from a lost runner. Mutation: read `value`
+    from `steps.v` -> red."""
+    assert action_yaml("verify-environments")["outputs"] == {
+        "refusal": {
+            "description": (
+                "The first error of the `::error::` message that failed the step, without the "
+                "prefix, its lines joined into one; empty when the step raised none. Set although "
+                "the step fails. Branch-controlled text (it can name an environment), so a reader "
+                "passes it through `env:`."
+            ),
+            "value": "${{ steps.verify.outputs.refusal }}",
+        }
+    }

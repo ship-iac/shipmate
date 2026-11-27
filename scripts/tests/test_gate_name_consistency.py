@@ -58,6 +58,7 @@ CREDENTIALED_ACTIONS = (
     "actions/summary",
     "actions/apply-complete",
     "actions/apply-summary",
+    "actions/cell-complete",
     "actions/drift-issues",
 )
 # Actions that will need the same credential-threading guard once they exist. Kept out of
@@ -215,7 +216,7 @@ def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
             "expected secrets block for this callee -- add its whole block there"
         )
     # A callee the registry gives the App key must declare it, so a future caller does not
-    # silently lose the credential thread; `cell.yml` writes no check and takes none.
+    # silently lose the credential thread.
     if "SHIPMATE_APP_PRIVATE_KEY" in expected and not _declares_app_private_key_secret(target_doc):
         return (
             f"{wf_name}:{job_name} -> {target} missing "
@@ -256,9 +257,9 @@ def _credentialed_step_offenses(wf_name, job_name, job):
 
 def test_credentialed_action_steps_thread_app_credentials():
     """Every step calling an action in CREDENTIALED_ACTIONS -- gate-refresh, summary,
-    apply-complete, apply-summary, drift-issues -- passes both `app-id` and `private-key` in
-    its `with:`, because each mints its own App installation token and 403s, or silently no-ops,
-    without both.
+    apply-complete, apply-summary, cell-complete, drift-issues -- passes both `app-id` and
+    `private-key` in its `with:`, because each mints its own App installation token and 403s, or
+    silently no-ops, without both.
 
     A job that is itself a reusable-workflow caller (`uses:` points at another
     `.github/workflows/*.yml`) threads the credential through the `secrets:` block rather than a

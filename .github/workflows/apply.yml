@@ -20,15 +20,19 @@ on:
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_ENCRYPTION_KEY: { required: false }
 jobs:
-  # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
-  # scripts/authorize; it admits any bot with actions:write. A refusal here starts no apply job,
-  # while `apply-run.yml`'s `summary` still reports a genuine `detect` failure. No secrets,
-  # environment or checkout.
+  # Names why `run.if` refused the dispatch: the failing check step states its rule, and the
+  # last step refuses when none does. A human cannot make github.actor a bot login, so the first
+  # step stops a hand dispatch that would skip scripts/authorize. No secrets, environment or checkout.
   guard:
+    needs: [run]
+    # A run cancelled before `run` starts also leaves it skipped; `!cancelled()` keeps that run
+    # from refusing.
+    if: ${{ !cancelled() && needs.run.result == 'skipped' }}
     runs-on: ubuntu-slim
     permissions: {}
     steps:
-      - name: Reject dispatches that did not come from a bot actor
+      - &reject-actor
+        name: Reject dispatches that did not come from a bot actor
         if: ${{ !endsWith(github.actor, '[bot]') }}
         run: |
           echo "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
@@ -36,26 +40,31 @@ jobs:
       # A called workflow's `github` context is its caller's, so these read the dispatch itself.
       # A fence `auto` job without `auto: true` would otherwise run the App's dispatch as a bare
       # apply, skipping the actor, provenance, autoplan actor and mergeability checks.
-      - name: Reject an auto dispatch that does not run the auto form
+      - &reject-auto-without-form
+        name: Reject an auto dispatch that does not run the auto form
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto }}
         run: |
           echo "::error::apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'; give the shipmate.yml 'auto' job the published 'with:' block (shipmate doctor names the difference)"
           exit 1
-      - name: Reject the auto form outside an auto dispatch
+      - &reject-form-outside-auto
+        name: Reject the auto form outside an auto dispatch
         if: ${{ inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto') }}
         run: |
           echo "::error::apply refused: the calling job passes 'auto: true', but this run is not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
           exit 1
       # Fails closed: an unreadable `inputs` reads '' and refuses every bare and targeted apply,
       # as does any call that is not a dispatch.
-      - name: Reject a bare or targeted apply outside an apply dispatch
+      - &reject-non-apply
+        name: Reject a bare or targeted apply outside an apply dispatch
         if: ${{ !inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply') }}
         run: |
           echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
           exit 1
 
-      # An apply dispatch claims its comment in `admit`; one without a comment id would bypass it.
-      - name: Reject an apply dispatch without a comment id
+      # An apply dispatch claims its comment in `apply-run.yml`'s `review`; one without a comment
+      # id would bypass the claim.
+      - &reject-no-comment
+        name: Reject an apply dispatch without a comment id
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '' }}
         run: |
           echo "::error::apply refused: this apply dispatch carries no comment_id, so no comment can be claimed for it; comment 'shipmate apply' on the pull request instead"
@@ -63,7 +72,8 @@ jobs:
 
       # The number keys `apply-run.yml`'s concurrency group, so two spellings of one pull request
       # must not reach two groups. Read through `env:`: a `${{ }}` inside `run:` is injectable.
-      - name: Reject a pull request number that is not canonical
+      - &reject-pr-number
+        name: Reject a pull request number that is not canonical
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
@@ -71,54 +81,18 @@ jobs:
             echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero); a workflow or App other than shipmate's comment-ops and autoplan sent this dispatch; comment 'shipmate apply' on the pull request instead"
             exit 1
           fi
+      - name: Refuse a dispatch that no check explains
+        run: |
+          echo "::error::apply refused: this dispatch did not meet the apply job's conditions and no rule names why; comment 'shipmate apply' on the pull request"
+          exit 1
 
-  # After `guard`, so a refused dispatch writes no reaction. A second run of the same comment reads
-  # `taken` and writes no `admitted`; an `auto` dispatch carries no `comment_id`, skips the claim
-  # and is admitted by that empty input. Outside the group, before this run joins it.
-  admit:
-    needs: [guard]
-    # `!cancelled()` drops the implicit success of `guard`, so it is stated.
-    if: ${{ !cancelled() && needs.guard.result == 'success' }}
-    runs-on: ubuntu-slim
-    environment: { name: shipmate-engine, deployment: false }
-    # Its writes use the App token; a job-token `actions: write` would fail every caller that
-    # grants `actions: read`.
-    permissions: {}
-    outputs:
-      admitted: ${{ steps.admit.outputs.admitted }}
-    steps:
-      - id: claim
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
-        uses: $/actions/claim
-        with:
-          verb: apply
-          environment: ${{ inputs.environment }}
-          pr-number: ${{ inputs.pr_number }}
-          comment-id: ${{ github.event.inputs.comment_id }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      - id: admit
-        if: ${{ steps.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '' }}
-        run: echo "admitted=true" >> "$GITHUB_OUTPUT"
-      # Cancels this pull request's apply runs that wait at an older head and replies naming the
-      # run this one waits behind (scripts/apply-queue). Display only: `run` reads `admitted`,
-      # which a failed queue step leaves written.
-      - id: queue
-        if: ${{ steps.admit.outputs.admitted == 'true' }}
-        uses: $/actions/apply-queue
-        with:
-          pr-number: ${{ inputs.pr_number }}
-          environment: ${{ inputs.environment }}
-          auto: ${{ inputs.auto }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-
-  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time. `!cancelled()`
-  # keeps a run cancelled before it starts from queueing an apply. The empty `comment_id` admits an
-  # `auto` run without `admit`'s outputs, which a lost runner leaves empty.
+  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time; its `review`
+  # repeats `guard`'s check steps and claims the comment.
   run:
-    needs: [guard, admit]
-    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}
+    # `!cancelled()` keeps a cancelled run from queueing an apply. Then `guard`'s check conditions
+    # negated and the canonical-number test; an expression error skips the call too.
+    # test_apply_dispatch_actor_guard.py keeps the two in step.
+    if: ${{ !cancelled() && !(!endsWith(github.actor, '[bot]')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto) && !(inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto')) && !(!inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '') && format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' && fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 && !contains(inputs.pr_number, '.') }}
     uses: ./.github/workflows/apply-run.yml
     # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.
     permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
@@ -135,19 +109,46 @@ jobs:
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
+  # Cancels this pull request's apply runs that wait at an older head and replies naming the run
+  # this one waits behind (scripts/apply-queue). Display only: nothing needs it, and it may end
+  # after `run` joined the group. Same `if:` as `run` without `!cancelled()`.
+  queue:
+    if: ${{ !(!endsWith(github.actor, '[bot]')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto) && !(inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto')) && !(!inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply')) && !(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '') && format('{0}', fromJSON(inputs.pr_number)) == inputs.pr_number && inputs.pr_number != 'true' && fromJSON(inputs.pr_number) >= 1 && fromJSON(inputs.pr_number) < 1e10 && !contains(inputs.pr_number, '.') }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    # Its writes use the App token; a job-token `actions: write` would fail every caller that
+    # grants `actions: read`.
+    permissions: {}
+    # A lost runner or a setup error fails this job, not the run.
+    continue-on-error: true
+    timeout-minutes: 3
+    steps:
+      # `guard`'s checks, before any step reads the App key.
+      - *reject-actor
+      - *reject-auto-without-form
+      - *reject-form-outside-auto
+      - *reject-non-apply
+      - *reject-no-comment
+      - *reject-pr-number
+      - uses: $/actions/apply-queue
+        with:
+          pr-number: ${{ inputs.pr_number }}
+          environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
   # `always()`, not `!cancelled()`: it must answer a cancelled run too, and only job-level status
-  # functions see that cancel. Outside `apply-run.yml`'s group, so it also answers a run cancelled
-  # while it waited there. Holds the App key but checks nothing out.
+  # functions see that cancel. It answers only a run whose `review` wrote `admitted`, so a run
+  # cancelled while it waited in the group stays silent. Holds the App key but checks nothing out.
   outcome:
-    needs: [guard, admit, run]
-    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && (needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}
+    needs: [run]
+    if: ${{ always() && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && needs.run.outputs.admitted == 'true' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      # An output that did not arrive reads empty, never the refused text. A call cancelled or
-      # skipped before `review` reported counts as a cancel; a call that failed before it
-      # reported gets the ended text.
+      # An output that did not arrive reads empty, never the refused text.
       - id: reply
         uses: $/actions/outcome-reply
         with:
@@ -156,7 +157,7 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           review-result: ${{ needs.run.outputs.review_result }}
           summary-result: ${{ needs.run.outputs.summary_result }}
-          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || ((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && needs.run.outputs.review_result == '') }}
+          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Display only: nothing reads the check, so a failure here must not fail outcome.

@@ -71,17 +71,18 @@ STEPS = [
     },
 ]
 
-#: `review`'s step, whole: after `rd`, with the default `if:`, so only a review that bound
-#: `ref` to the head starts a check.
+#: `review`'s step, whole: after `rd`, with no status function in its `if:`, so only a review
+#: that claimed the command and bound `ref` to the head starts a check.
 REVIEW_STEP = {
     "name": START,
+    "if": "${{ steps.admit.outputs.admitted == 'true' }}",
     "uses": USES,
     "continue-on-error": True,
     "timeout-minutes": 1,
     "with": _with("start"),
 }
 
-#: `summary`'s step, whole: after the apply comment, and run after a failed gate refresh.
+#: `summary`'s step, whole: last, after the comment and the gate refresh.
 SUMMARY_STEP = {
     "name": FINISH,
     "if": "${{ always() && steps.result.outputs.posted == 'true' }}",
@@ -124,18 +125,24 @@ def test_the_action_steps_are_whole():
 
 def test_review_starts_the_check_after_rd():
     """Mutations: drop `continue-on-error`; `mode: finish`; `head-sha: ${{ github.sha }}`;
-    move the step before `rd` -- each red."""
+    move the step before `rd`; drop its `if:` (a `taken` run starts a check) -- each red."""
     before, step = _site("apply-run.yml", "review")
     assert before["id"] == "rd"
     assert step == REVIEW_STEP
 
 
 def test_summary_finishes_the_check_after_the_apply_comment():
-    """Mutations: drop `continue-on-error`; drop `always() && ` from the `if:`; drop the
-    `posted` clause; `head-sha: ${{ github.sha }}`; move the step before the apply comment --
+    """`finish` is last, after the apply comment and the gate refresh, in that order.
+    Mutations: drop `continue-on-error`; drop `always() && ` from the `if:`; drop the
+    `posted` clause; `head-sha: ${{ github.sha }}`; move the step before the gate step --
     each red."""
-    before, step = _site("apply-run.yml", "summary")
-    assert before["id"] == "result"
+    _, step = _site("apply-run.yml", "summary")
+    steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
+    assert [s.get("name") for s in steps[-3:]] == [
+        "Post apply result comment",
+        "Complete gate if every apply check is done",
+        FINISH,
+    ]
     assert step == SUMMARY_STEP
 
 

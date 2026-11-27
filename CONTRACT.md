@@ -97,8 +97,8 @@ the dispatch omits renders empty (`pr=`). The title is built from dispatch
 inputs, so it identifies a run only when the App dispatched it: anyone who can
 dispatch the workflow chooses the inputs. The engine reads a title only for a
 `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
-`admit` lists a pull request's apply runs by it to cancel the stale ones and
-name the one a run waits behind, and `apply-run.yml`'s `review` lists them to
+`queue` job lists a pull request's apply runs by it to cancel the stale ones and
+name the one a run waits behind, and `apply-run.yml`'s `waiters` lists them to
 tell the runs waiting behind its run (§Comment-ops, "One apply run
 per pull request"), and `scripts/dispatch-body` looks for a comment's run by it before
 it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
@@ -154,10 +154,15 @@ refuses the run before any cell applies.
    that refuses the plan summary.
 2. Flipped to `in_progress` when its wave is released, linked to the apply run,
    its start time set to the release, so GitHub's duration counts from the
-   release.
+   release. In an apply run, `apply-run.yml`'s `lock` releases the first
+   populated env-level's `wave0` (First level, below).
 3. Written once the cell's outcome is read. The summary is never rewritten; the
    error goes in the title. A check returned to `queued` keeps its last start
-   time.
+   time. A cell's `save` job writes its `success`, at its step
+   `Complete this cell's apply check`, once the cell's `apply` job and the
+   `save` job's `Save the cell's state` step succeeded. The level's `complete`
+   job runs only when a release or wave of the level failed or was cancelled,
+   or the run was cancelled, and then writes every check of the level.
 
 | Cell outcome | Write |
 | --- | --- |
@@ -167,13 +172,26 @@ refuses the run before any cell applies.
 | not run: its wave did not run | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
-| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Last wave** describe |
+| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Failed completion** describe |
 
 A write other than `success` leaves alone a check another writer, such as a
 merge deploy, has completed. The first error line is the message of the failed
 job's first `failure` annotation: its first line, control characters stripped,
 cut at 120 characters, or `Failed` alone when there is none or it cannot be
 read.
+
+A cell's state counts as saved when its `save` job's `Save the cell's state`
+step succeeded, whatever the job's conclusion. A `save` job that fails after
+that step, at the check write, saved the state: its wave fails, so later waves
+and environment levels do not start, and the level's `complete` writes the
+cell's check `success`. The apply result comment then shows that cell applied,
+the cells that did not start `not attempted`, and
+``retry with `shipmate apply` ``: comment `shipmate apply` again, which applies
+only the checks still pending. A merge deploy posts no apply result comment:
+re-run the deploy, which starts from the checks still open. A `save` job that
+ends or is rejected before `Save the cell's state` reports `success` did not save; GitHub rejects one
+before its first step under `shipmate-engine`'s deployment branch policy or
+protection rules. A cell whose apply may have run is then held.
 
 A pre-merge apply run reads its pull request before it writes. Once the pull
 request has merged, the run writes only its `success` and held writes and
@@ -205,11 +223,12 @@ The next apply or deploy of the cell reads the run that holds the check. When
 that run never applied the cell, a bare or targeted `shipmate apply` applies
 it, a merge deploy queues it, and an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
-**Last wave.** A level's last populated wave runs no `waveN-complete` job:
-`complete`, which runs right after it, alone writes its checks. A `complete`
-that fails, including one whose jobs listing still lags after its about 2
-minutes of retries, leaves them `in_progress`, linked to the run, and the next
-apply or deploy of the cell reads that run as the holder (table below):
+**Failed completion.** A check of a cell whose `save` did not write its
+`success` is written by the level's `complete` alone. A `complete` that fails,
+including one whose jobs listing still lags after its about 2 minutes of
+retries, leaves the level's failed and cancelled cells' checks `in_progress`,
+linked to the run, and the next apply or deploy of the cell reads that run as
+the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
   merge deploy queues it; an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells); comment
@@ -237,6 +256,27 @@ A merge deploy whose own `complete` fails this way leaves the checks
   completed; a cell re-run on its own refuses whatever its check shows. Follow
   §`The apply step ran and its state was not saved`, then apply the stack
   through a new pull request touching it.
+
+**First level.** In an apply run, `apply-run.yml`'s `lock` snapshots the first
+populated env-level's checks and flips its `wave0`, so that level's `snapshot`
+and `wave0-release` jobs skip and its cells' `save` jobs and its `complete`
+job write on `lock`'s check ids. Every later level, and every level of a merge
+deploy, snapshots and releases its own. When the first level's call never
+starts after `lock` ran (a run cancelled between them, or a `lock` that failed
+after its snapshot), `apply-run.yml`'s `unflip` job writes that level's `wave0`
+checks `queued`, titled `Not run`. A refusal `lock` records before the flip (a
+changed review decision, a cell lock another pull request holds, a missing or
+unprotected environment, a failed check listing) skips `unflip`. A `lock` that
+ends before the flip without recording one (a failed key check or token mint, a
+cancel) still runs `unflip`, which retitles those `queued` checks `Not run`.
+After a lost `lock` runner, `unflip` lists the head's checks again and fails
+when the listing holds fewer rows than its total count. Accepted limits:
+
+- A lost `unflip` runner, or an `unflip` write that fails after its retries,
+  leaves the flipped checks `in_progress`; the next apply reads the run as
+  ended (In-progress checks, below).
+- After a lost `lock` runner, a listing whose count is complete but omits a
+  check leaves that check `in_progress`.
 
 **In-progress checks.** A merge deploy reads every App apply check of a pending
 cell that is `in_progress` under another run, and a pre-merge apply those of
@@ -313,13 +353,14 @@ write fails no job. The merge deploy writes none.
 
 | Case | Check |
 | --- | --- |
-| `guard` refuses, the claim reads taken, the run is cancelled while it waits in `shipmate-apply-<pr_number>`, or `review` refuses | none is created |
+| `apply.yml` refuses the dispatch, the claim reads taken, the run is cancelled while it waits in `shipmate-apply-<pr_number>`, or `review` refuses | none is created |
 | the App key is missing or the token mint fails | `review` fails first, so none is created |
 | `review` passes | created `in_progress`, linked to the run |
 | `summary` posts the result comment, after a run cancel included | `summary` completes it `neutral` |
 | `summary` posts no result comment (it failed, was cancelled at a full gate-writer queue, or its post failed) and `outcome` posts its reply | `outcome` completes it `neutral` |
 | neither the result comment nor the reply is posted | stays `in_progress`: no result exists |
 | a second cancel, a lost runner, or a failed completion | stays `in_progress` |
+| `review`'s runner is lost after it created the check | stays `in_progress`, and `outcome` posts nothing (§Outcome reply) |
 
 A check left `in_progress` is completed `neutral` by the next apply run of the
 same head when that run starts and reads the linked run as ended. It keeps its
@@ -453,8 +494,10 @@ off the pull request's checks list.
   inside an auto-created environment holds no reviewers, no wait timer and no
   deployment branch policy, against the right code and the right state.
 - **A binding that names no existing environment, or one with no deployment
-  branch policy, is refused before any wave applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
-  fans through, and which runs before `wave0` — reads the `env_binding` of
+  branch policy, is refused before any wave applies.** The pre-flight job of each env-level,
+  before its `wave0` — `apply-run.yml`'s `lock` for an apply run's first
+  populated level, `apply-env-level.yml`'s `snapshot` for every later level and
+  every level of a merge deploy — reads the `env_binding` of
   every cell in the incoming matrix, lists the repository's environments once,
   and fails the run naming every binding the repository does not have, plus
   both ways to fix it: create that environment, or correct the environment's
@@ -464,7 +507,7 @@ off the pull request's checks list.
   policy (custom branches or protected branches) is the consumer's choice. It is
   what refuses a binding naming no environment: it compares existence and the
   presence of a branch policy, not table content, and a cell resolves its variables
-  from the table whatever it bound. It runs once per `apply-env-level.yml` call,
+  from the table whatever it bound. It runs once per env-level,
   so an env-ordered deploy can have completed an earlier level's applies before a
   later level is refused — a partial deploy, not an unverified apply: every level
   verifies its own environments before its own waves.
@@ -476,13 +519,14 @@ off the pull request's checks list.
   - It costs a caller nothing, but not because it needs nothing: listing
     environments needs `actions: read` — on a private repository the default
     `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
-    call site already grants `actions: read` for its wave jobs, `waveN-complete` and `complete`, so
-    the `uses:` permission cap is already high enough. A hand-written wrapper
+    call site already grants `actions: read` for its wave jobs and `complete`, so
+    the `uses:` permission cap is already high enough; `lock` requests
+    `actions: read` and `checks: read` itself. A hand-written wrapper
     calling `apply-env-level.yml` must grant it. The environment check uses no
-    App key or App permission. The same job binds `shipmate-engine`, verifies
+    App key or App permission. The pre-flight job binds `shipmate-engine`, verifies
     the App key arrived and mints an App token whose only use is to prove the
-    key authenticates, so a missing, revoked or wrong key fails `snapshot`
-    before any wave.
+    key authenticates, so a missing, revoked or wrong key fails the pre-flight
+    job (`lock` for the first level, `snapshot` for later ones) before any wave.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names
@@ -507,8 +551,8 @@ off the pull request's checks list.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `admit` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
-  `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete`,
+  `queue` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
+  `wave0-release` … `wave7-release` and `complete`, `cell.yml`'s `save`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -521,6 +565,18 @@ off the pull request's checks list.
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
+  The App key must be a `shipmate-engine` environment secret. Every wave
+  passes the caller's `SHIPMATE_APP_PRIVATE_KEY` to `cell.yml`, so a key
+  stored as a repository or organization secret reaches every cell's `apply`,
+  as does one on a cell's apply environment. Either fails that `apply` at its
+  first step, before any pull-request code runs:
+  ``SHIPMATE_APP_PRIVATE_KEY reaches pull-request code in this apply job: the environment <binding>, or a repository or organization secret, holds it; delete it there and keep the key only on shipmate-engine``.
+  A repository- or organization-scoped key therefore makes every `apply`
+  refuse. Delete the secret where it is and keep the key only on
+  `shipmate-engine`. Binding `shipmate-engine` subjects saving a cell's
+  state to that environment's deployment branch policy and protection rules: a
+  `save` job they reject fails before `Save the cell's state`, and a cell
+  whose apply may have run is held (§Apply check lifecycle).
 - For every name in the row's `tf_vars` — the layout's derived names plus the
   environment's own `vars` — the value `tofu` receives is the table's. A
   consuming repository's `terramate.config.run.env` may read any name, and may
@@ -1162,7 +1218,7 @@ job each request `id-token: write` and run
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
 except that a shared environment (`split: false`) resolves `aws.apply` on
-every path. The `snapshot`, `waveN-complete` and `complete` jobs and each apply
+every path. The `snapshot` and `complete` jobs and each apply
 cell's `save` job deliberately get no cloud credential.
 
 On the apply path the engine passes through whatever role the environment
@@ -1538,34 +1594,36 @@ how far a command got:
   the command is authorized, right before the dispatch. A refused command gets
   none.
 - 🚀 (`rocket`): a run claimed the command. On `plan` and `apply` the shipmate
-  App writes it from `plan.yml`'s `claim` job or the claim step of `apply.yml`'s
-  `admit` job, and it decides whether
-  that run does any work (below). On `unlock`, `unlock.yml`'s `guard` writes it
-  with the job token, so it shows as `github-actions[bot]`'s, after its actor
-  check and only for a `comment_id` that is a comment id; it is display only and
-  gates nothing, since a second `unlock` finds no lock.
+  App writes it from `plan.yml`'s `claim` job or the claim step of
+  `apply-run.yml`'s `review` job, and it decides whether a plan run does any
+  work, and whether an apply run locks, applies and posts its result comment or
+  outcome reply (below). On `unlock`, `unlock.yml`'s `guard` writes it with the
+  job token, so it shows as `github-actions[bot]`'s, after its actor check and
+  only for a `comment_id` that is a comment id; it is display only and gates
+  nothing, since a second `unlock` finds no lock.
 
 A 👀 that cannot be posted is ignored; an `unlock` 🚀 that cannot be posted
 warns.
 
 A dispatch from a comment carries the comment's id as `comment_id`. The
-`claim` job of `plan.yml`, and the claim step of `apply.yml`'s `admit` after `guard`
-succeeds, runs when
+`claim` job of `plan.yml`, and the claim step of `apply-run.yml`'s `review` after
+its check steps, runs when
 the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, a
 comment-less plan (the plan `summary`'s replan, the merge deploy's re-plan of
 open pull requests) and an `auto` run carry none: the claim is skipped and the run
-proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
-dispatch without one. `claim` and `admit` bind `shipmate-engine` and check
+proceeds. `apply.yml` refuses a `verb: apply`
+dispatch without one. `claim` and `review` bind `shipmate-engine` and check
 nothing out; the claim mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
 🚀 on the comment once, never retried. GitHub answers the first creation of a
 reaction 201 and every later one 200, so one run of a comment does the work:
 
 - 201: the run owns the comment and proceeds.
-- 200: another run of the comment owns it. This run does nothing and writes
-  nothing on the pull request; its job summary says another run owns the
-  comment.
-- Any other answer, or a failed POST: the job fails, the run does nothing, and
-  it replies ``🔴 failed: could not claim this command for its run, so the
+- 200: another run of the comment owns it. A plan run does nothing and writes
+  nothing on the pull request; an apply run applies nothing and posts no result
+  comment or outcome reply, though its ungated jobs run (below). Its job summary
+  says another run owns the comment.
+- Any other answer, or a failed POST: the job fails, the run plans or applies
+  nothing, and it replies ``🔴 failed: could not claim this command for its run, so the
   command was not started. Comment it again.``. A reply that cannot be posted
   is a warning.
 - A `comment_id` that is not a comment id, a `pr_number` that is not a pull
@@ -1575,24 +1633,34 @@ reaction 201 and every later one 200, so one run of a comment does the work:
 - A missing App key or a failed token mint fails the job with no reply, since
   there is no token to post one. The comment shows 👀 alone and the run is red.
 
-Every job after the claim that does work or replies runs only when the claim
-owned the comment or was skipped, so a failed claim gates the run closed. In
-`apply.yml`, `admit` records that as its `admitted` output, which `run` and
-`outcome` read; an `auto` run starts them by its empty `comment_id` alone. A
-commented apply whose `admit` runner is lost after the claim reacted starts
-neither: the comment keeps its 🚀 and `apply / admit` shows failed. Comment
-`shipmate apply` again. A cancel that lands after the claim reacted and before
-the step that records `admitted` leaves the comment claimed with no
-`admitted`, so `outcome` posts no cancelled reply; comment again.
+In a plan run, every job after the claim that does work or replies runs only
+when the claim owned the comment or was skipped, so a failed claim gates the run
+closed. In an apply run, `review` admits the run only then, and admission gates
+`lock`, every env-level, the running apply check, `summary` and `outcome`.
+`detect`, which needs no job, and `queue`, beside `run`, run whatever the claim
+reads, so `queue` can still cancel stale runs and post a queue reply; `waiters`
+runs after a successful `review`, a taken claim included. An `auto` run, which
+skips the claim, owns its run by its empty `comment_id`.
+
+An apply run claims in `review`, after its call joined
+`shipmate-apply-<pr_number>` and waited its turn there (§Comment-ops, "One
+apply run per pull request"). So the 🚀 appears when the run starts, not when it
+is dispatched, and the comment belongs to the first run of it to reach
+`review`: a run cancelled while it waits never claimed it, and a later dispatch
+of the same comment can own it. A run that loses the claim, or whose claim
+refuses its actor, has still waited in the group, and holds it while `detect`
+runs before it ends having applied nothing. An apply whose `review` runner is
+lost after the claim, or that is cancelled after the claim reacted and before
+`review` recorded it, gets no reply (§Outcome reply); its comment keeps its
+🚀. Comment `shipmate apply` again.
 
 Re-runs follow from the claim's recorded result and its one POST. For a plan
 run, "Re-run failed jobs" keeps a finished claim's result: an owned run stays
-owned and a taken one stays taken. For an apply run, it re-runs a failed
-`admit` whole: after a claim that reacted, as when the queue step failed, the
-claim reads 200, `admitted` stays unset, and `run` and `outcome` skip, so no
-reply is posted and the comment shows only its 🚀. When `admit` succeeded and a
-later job failed, `admit` is not re-run and keeps `admitted`, so any cell job
-it re-runs refuses as a run attempt above 1. "Re-run all
+owned and a taken one stays taken. For an apply run, it keeps a successful
+`review` and its claim's result, so any cell job it re-runs refuses as a run
+attempt above 1. It re-runs a failed `review` whole: after a claim that reacted,
+the claim reads taken (200), so the attempt applies nothing, ends without a
+reply, and the comment shows only its 🚀; comment `shipmate apply` again. "Re-run all
 jobs" posts again and reads 200, and GitHub deletes the earlier attempts'
 artifacts. For a plan run, the claim then reads each earlier
 attempt's jobs: when `facts` ran in one (`success`, `failure` or `timed_out`),
@@ -1600,7 +1668,9 @@ this run owned the comment, so it owns it again and plans again. Any other
 conclusion of `facts`, such as skipped or cancelled, or no `facts` job, means
 the comment is taken, and the re-run does nothing; comment again. A listing
 that fails or is malformed fails the claim as above. For an apply run, "Re-run
-all jobs" does nothing unless an earlier claim failed before reacting (below).
+all jobs" applies nothing and posts no result comment or outcome reply unless
+no earlier attempt reacted: its claim failed
+before reacting (below), or the run was cancelled before `review` claimed.
 Re-running a run whose claim failed posts again; when the failed attempt wrote
 no reaction it reads 201 and the run starts, so comment the command again or
 re-run that run, not both. A re-run of an apply run applies no cell either way
@@ -1636,16 +1706,17 @@ five seconds before the first attempt. What stops the retry depends on the
 dispatch:
 
 - A comment's dispatch and a comment-less `plan` read every page of 100 runs,
-  newest first, back to `t0`, and read again each second until 10 seconds
-  after the failed attempt. Each stops at a `workflow_dispatch` run whose
-  `actor` is the App's `<slug>[bot]` and whose title (§Check names) is this
-  dispatch's: this verb and comment id, with this pull request, or for `unlock`
-  no pull request and this ref. A comment-less plan's title carries no comment
-  id and is shared by every comment-less plan of the pull request, so its run
-  must also be created at or after `t0`; a comment id makes a title unique, so a
-  commented dispatch's run needs no time bound. Otherwise it retries: the claim
-  (above) leaves a second `plan` or `apply` run doing nothing, a second
-  comment-less plan plans the head again, and a second `unlock` finds no lock. Without the App's slug no run can be told to be this
+  newest first, back to `t0`, and read again each second until 10 seconds after
+  the failed attempt. Each stops at a `workflow_dispatch` run whose `actor` is
+  the App's `<slug>[bot]` and whose title (§Check names) is this dispatch's:
+  this verb and comment id, with this pull request, or for `unlock` no pull
+  request and this ref. A comment-less plan's title carries no comment id and is
+  shared by every comment-less plan of the pull request, so its run must also be
+  created at or after `t0`; a comment id makes a title unique, so a commented
+  dispatch's run needs no time bound. Otherwise it retries: under the claim
+  (above) a second `plan` run does nothing and a second `apply` run applies
+  nothing; a second comment-less plan plans the head again; and a second
+  `unlock` finds no lock. Without the App's slug no run can be told to be this
   dispatch's, so the dispatch is refused before it is sent. Every comment-less
   plan of one pull request has the same title, so the plan `summary`'s replan
   and the merge deploy's re-plan landing in one window stop each other's
@@ -1695,7 +1766,7 @@ at the first page holding a run created before `t0`, so under that skew its run
 is missed too when a page before it holds a run created before `t0`.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
-reads the claim as taken and does nothing. A double-started `auto` run still
+reads the claim as taken and plans or applies nothing. A double-started `auto` run still
 starts, waits in `shipmate-apply-<pr_number>` until the first ends ("One apply
 run per pull request") and posts its own result comment. Its `detect` finds
 the checks the first run applied completed, so it applies none of them, and it
@@ -1981,13 +2052,15 @@ with `verb: auto` by the plan run and has no comment time; detect decides what
 comment-ops decides for the other two (§`apply_mode: auto`).
 
 The dispatch is bound to its pull request after it arrives, because a dispatch
-can reach `apply.yml` without passing comment-ops: its `guard` job admits any
-`[bot]` actor, and a workflow's own `GITHUB_TOKEN` dispatches as one. The
-`review` job reads the pull request `pr_number` names and refuses the run, before
+can reach `apply.yml` without passing comment-ops: its `run` job's condition
+passes any `[bot]` actor, and a workflow's own `GITHUB_TOKEN` dispatches as one. The
+`review` job, and `detect` beside it, each read the pull request `pr_number` names and refuse the run, before
 any wave, unless it is open, not a draft, not from another repository, and its
 head commit equals the dispatched `ref`, compared whole. A merged pull request is
-refused too: its plans apply through the merge deploy. So at dispatch time the
-`review` job re-checks open, draft, same repository, head and review decision;
+refused too: its plans apply through the merge deploy. So at dispatch time
+`review` and `detect` re-check open, draft, same repository, head and review decision,
+and `lock` refuses unless both read the same decision (§Cell locks, "Limit: the
+race between `detect` and `lock`");
 mergeability is checked at comment time only, because GitHub computes it
 asynchronously and a conflict bypasses no review. The `auto` form checks it in
 detect instead (§`apply_mode: auto`). Then each apply form's
@@ -1995,10 +2068,21 @@ detect refuses a cell it would apply whose apply check records another pull
 request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
 request.
 
-**One apply run per pull request.** `apply.yml` holds four jobs: `guard`, `admit`,
-`run` and `outcome`. `run` calls `apply-run.yml`, which holds every job that reviews,
-detects, locks, applies or summarizes: `review`, `detect`, `lock`, `envlevel0` …
-`envlevel3` (named `L0` … `L3`) and `summary`. `apply-run.yml` runs in the
+**One apply run per pull request.** `apply.yml` holds four jobs: `run`, `queue`,
+`guard` and `outcome`. `run` and `queue` share one condition, the negation of
+every check `guard`'s steps make, so a dispatch one of them refuses skips both and
+binds no environment; `run` also does not start in a cancelled run. `queue` and
+`apply-run.yml`'s `review` repeat those checks as their first steps, so a
+dispatch the condition passes and a step refuses fails `apply / run / review` and
+`apply / queue` with its `apply refused:` text before any step reads the App
+key; `queue`'s `continue-on-error` keeps its failure off the run's result. `guard` runs only
+after `run` was skipped, and fails naming the refusal, or with ``apply refused:
+this dispatch did not meet the apply job's conditions and no rule names why;
+comment 'shipmate apply' on the pull request`` when no check names one. `outcome`
+runs after `run` (§Outcome reply). `run` calls `apply-run.yml`, which holds
+every job that claims, reviews, detects, locks, applies or summarizes: `review`,
+which claims the comment, and `detect`, which run side by side, `waiters`, which runs after `review` and which no job needs, `lock`, `envlevel0` … `envlevel3` (named `L0` … `L3`), `unflip` and
+`summary`. `apply-run.yml` runs in the
 top-level concurrency group `shipmate-apply-<pr_number>` with
 `cancel-in-progress: false` and `queue: max`, so one apply run (`apply` or
 `auto`) of a pull request runs at a time and a later one waits until it ends.
@@ -2007,10 +2091,20 @@ and does not guarantee that order. The group holds one running run and up to
 100 waiting ones; a run that arrives at a full queue is cancelled. A run waiting
 on an `<env>-apply` environment's approval holds the queue for its pull request
 until a reviewer approves or rejects it, or the approval wait times out.
-`guard` refuses a `pr_number` that is not 1 to 10 digits without a leading zero
+`apply.yml` refuses a `pr_number` that is not 1 to 10 digits without a leading zero
 before the number keys the group, so two spellings of one pull request cannot
-reach two groups. `outcome` stays in `apply.yml`, outside the group, so it
-answers a run cancelled while it waits (§Outcome reply). The per-cell
+reach two groups. Every dispatch that passes `run`'s condition takes a place in
+the group, whether or not it will own its comment: a second run of a comment,
+or a `[bot]` dispatch the claim refuses, waits its turn, then holds the group
+while `detect` runs, read-only, and ends having applied nothing. It posts no
+result or outcome reply, but its `queue` job can still cancel stale runs and post
+a waits reply. A second run of a comment, whose claim reads taken, also runs
+`waiters` while it holds the group, which can tell the runs waiting behind it; a
+refused claim fails `review`, so `waiters` does not run. Either run's `detect` still refuses as any run's does, so such a run can
+end red, for example when "Re-run all jobs" re-runs it after the pull request merged. No bound on that hold is claimed: it covers `detect`'s runner
+pickup, checkout, setup and wait for plan runs, and a lost `detect` runner holds
+it until GitHub ends the job. A run cancelled while it waits never reached its
+claim, so it gets no reply (§Outcome reply). The per-cell
 `apply-<env>-<stack>` groups (below) still order applies across pull
 requests and the merge deploy.
 
@@ -2018,8 +2112,8 @@ In a bare or targeted apply, `detect` first waits while a `shipmate plan` run of
 the pull request is live: a `workflow_dispatch` run of `shipmate.yml` by any
 actor whose title is a `shipmate plan` of this pull request (§Check names),
 listed `requested`, `pending`, `queued`, `waiting` or `in_progress`.
-Autoplans are not listed. It waits after `review` and before it reads the
-head's checks, polling every 30 seconds for up to 8 minutes of elapsed time; a
+Autoplans are not listed. It waits after its own pull-request read and before it reads the
+head's checks, sleeping at most 30 seconds between polls for up to 8 minutes of elapsed time; a
 run that starts during the wait joins it within the same 8 minutes. An `auto`
 apply does not wait (§`apply_mode: auto`, Newer plan). The apply then applies
 the records as they stand once no `shipmate plan` run of the pull request is
@@ -2057,28 +2151,38 @@ The first two are refusals by rule; the last two are failed reads (§Apply
 result comment). None applies anything: `detect` writes no outputs, so `lock`
 and every wave skip.
 
+`detect` does not wait for `review`, so a `review` that fails on its App token
+alone does not stop it. On a commented apply the claim runs the first key check
+and mint, before `review` admits the run, so their failure posts no reply. On a
+commented apply, a failure after admission (the second key check and mint, an
+error from the pull-request read) gets the outcome reply, so a bare or targeted
+apply can still wait up to 8 minutes for plan runs before `outcome` replies. This limit is accepted: the wait is read-only.
+
 An apply run is cancelled by a manual cancel (the Actions UI or `gh run
 cancel`). GitHub cancels the run's call into `apply-run.yml` when the call
-arrives at a full queue (`run` ends `cancelled`; `guard` stays green and
-`outcome` replies); that is GitHub's documented `queue: max` behaviour, not
+arrives at a full queue (`run` ends `cancelled`, and `guard` and `outcome`
+skip); that is GitHub's documented `queue: max` behaviour, not
 probed for this group. A job of the run can
 also end `cancelled` while the run is not: a cell that arrived at a full queue
 of its cell's concurrency group, a job timeout, or a `summary` at a full gate-writer queue
 (§Outcome reply says which text each selects). A run cancelled while
-it waits in the queue runs no job of `apply-run.yml`: its apply checks and
-`shipmate / gate` stay as they were, and `outcome` posts the cancelled reply.
+it waits in the queue, by hand, at a full queue or as a stale run, runs
+no job of `apply-run.yml`: its apply checks and `shipmate / gate` stay as they
+were, and it posts no reply of its own after the cancel; its `queue` job may
+already have posted a waits reply. The command comment shows 👀 alone. Comment
+the command again.
 
-`admit`'s queue step cancels this pull request's stale apply runs and says which run this one
-waits behind. It runs after `guard` and the claim step and before `run`, outside the group, binds
+`apply.yml`'s `queue` job cancels this pull request's stale apply runs and says which run this one
+waits behind. It runs beside `run`, outside the group, binds
 `shipmate-engine` and holds no job-token permission: it writes with an App token
 granting `actions: write` and `pull-requests: write`. It lists the live
 `workflow_dispatch` runs (`requested`, `pending`, `queued`, `waiting`,
 `in_progress`) of `shipmate.yml` whose title (§Check names) is an `apply` or `auto` of this
 pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
-Then the queue step reads the pull request's live head, the jobs of each trusted run's
+Then `queue` reads the pull request's live head, the jobs of each trusted run's
 latest attempt, and the head again. A trusted run whose title names another head
-is stale, and the queue step cancels it only when this run's own listed `ref` is the
+is stale, and `queue` cancels it only when this run's own listed `ref` is the
 live head (a run whose own title is not listed at the live head cancels nothing;
 stale runs stay until a run at the live head cancels them or they reach `review`,
 which refuses the moved head), its jobs listing is complete, both head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
@@ -2096,25 +2200,35 @@ and such a run is kept) either:
 Anything else keeps the run, whatever its status. A run past `review` with a job
 `pending` on its own concurrency group is kept: the engine cancels only a run
 whose call has not started or whose only unfinished jobs are cells waiting
-on approval. `guard`, `admit` and `outcome` sit outside the group and are not
+on approval. `guard`, `queue` and `outcome` sit outside the group and are not
 counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
 an App-dispatched run whose title does not parse, or a failed head read cancels
-nothing; after a failed first head read the queue step reads no run's jobs. An untrusted run is never cancelled. The queue step writes, a cancel or a
+nothing; after a failed first head read `queue` reads no run's jobs. An untrusted run is never cancelled. `queue` writes, a cancel or a
 reply, only when its own run's `actor` and `triggering_actor` are both
 `<slug>[bot]`, so a human re-run of an App-dispatched run writes nothing. The
-queue reports and tidies but never gates: a failed queue step does not stop `run`.
+queue reports and tidies but never gates: no job needs `queue`, which holds
+`continue-on-error: true` and `timeout-minutes: 3`, so its failure or a lost
+runner fails only `apply / queue`. It can end after `run` joined the group; its
+cancels do not depend on ending first.
 
 An `apply` run posts one ⚪ reply joining these sentences in this order, links
-built from run ids; an `auto` run posts none:
+built from run ids; an `auto` run posts only the cancel sentences, and nothing
+when it cancelled no run:
 
 - ``[the apply run](<url>) waits for [an earlier apply run](<url>) of this pull request to finish.``
   It names the trusted run holding the group (an unfinished job of its `run`
   call and a `review` that is not `pending`), else the oldest kept trusted run
   older than this one with an unfinished job of its call, else nothing. A run
-  left only in `outcome` is not named.
+  left only in `outcome` is not named. It is left out only when this run's own
+  call's `review` is listed running or done, because this run already holds the
+  group or its call ended: `queue` reads its own run's jobs, again up to three
+  times 3 seconds apart while that listing is incomplete or shows the `review`
+  neither `pending`, running nor done. When the listings cannot tell, it names
+  the run as above and the `queue` job warns.
 - ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
-  It names the untrusted run with the lowest run id.
+  It names the untrusted run with the lowest run id, and is left out, as the first
+  sentence is, when this run's own call's `review` is listed running or done.
 - ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
   One per cancelled run.
 - ``[the apply run](<url>) may wait for an earlier apply run of this pull request; its apply runs could not all be listed.``
@@ -2123,10 +2237,11 @@ built from run ids; an `auto` run posts none:
 A reply holding the first sentence starts with the line
 ``<!-- shipmate:waits-<run id> -->``, `<run id>` this run's; no other queue reply carries it.
 
-The run holding the group tells each waiting run too: a run's queue step can end
-before the run it then waits behind holds the group, and so names no holder, as
-when two commands arrive together. `apply-run.yml`'s `review`, as its last
-step, runs `actions/apply-waiters` (`scripts/apply-queue waiters`). It lists
+The run holding the group tells each waiting run too: a run's `queue` can end
+before the run it then waits behind holds the group, or before GitHub lists its
+own call waiting, and so names no holder, as when two commands arrive together. `apply-run.yml`'s `waiters` job, which runs
+after a successful `review`, runs `actions/apply-waiters` (`scripts/apply-queue
+waiters`). It lists
 the same runs, then reads the jobs of each App-dispatched run other than its
 own whose title carries a comment; a run whose `<caller> / run / review` is
 `pending` waits for this one. Only when one
@@ -2139,47 +2254,55 @@ told gets one ⚪ reply:
 
 The reply's first line is ``<!-- shipmate:waits-<run id> -->``, `<run id>` the
 waiting run's. A waiting run counts as told when a comment by `<slug>[bot]`
-starts with that whole line, so the queue step's holder reply and the holder's
-`review` reply count as one. The step writes under the queue step's
+starts with that whole line, so `queue`'s holder reply and the holder's
+`waiters` reply count as one. The step writes under `queue`'s
 `actor` rule, so a holder the App did not dispatch, or that a person re-ran,
 posts nothing; an `auto` holder replies. An `auto` waiting run has no comment and
 a run the App did not dispatch is not trusted; neither is told. The step is
 display only: a failed listing or POST warns and the step exits 0, and it holds
 `continue-on-error: true` and `timeout-minutes: 1`, so neither it nor a hung
-call fails `review`.
+call fails `waiters`.
 
 A cancelled stale run writes, by where it waited:
 
 - In the group, before its call started (a): no job of `apply-run.yml` ran, so its
-  apply checks and `shipmate / gate` stay as they were, and `outcome` posts the
-  cancelled reply.
+  apply checks and `shipmate / gate` stay as they were, and it posts no reply of
+  its own after the cancel: it never claimed its comment. Its `queue` job may
+  already have posted a waits reply.
 - On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
-  so its `waveN-complete`, which runs on `success` or `failure` only and never for
-  the level's last populated wave, is skipped,
-  and the level's `complete` returns the wave's flipped checks to `queued` titled
+  so the level's `complete` returns the wave's flipped checks to `queued` titled
   `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
   they stay pending. `summary` runs after a
-  successful `review`, refreshes the old head's gate and posts the apply comment,
+  successful `review`, posts the apply comment and refreshes the old head's gate,
   so `outcome` stays silent.
 
 These limits are accepted:
 
-- A stale run's job can start between the queue step's jobs read and its cancel, and
+- A stale run's job can start between `queue`'s jobs read and its cancel, and
   the cancel then stops it mid-run; only a cell whose `ref` is the live head
   passes `pre-apply`, so that window needs a force-push back to the stale head.
 - A run that changes status between two of the per-status listings, or within
   one listing between its page reads, can be missed, and is then neither
   cancelled nor named.
-- A waiting run whose call joins the group after the holder's `review` listed
-  the runs is not told by that holder; the next holder's `review` tells it if it
+- A waiting run whose call joins the group after the holder's `waiters` listed
+  the runs is not told by that holder; the next holder's `waiters` tells it if it
   still waits then.
-- The reply is display only: a waiting run that the queue step did not tell stays
+- The reply is display only: a waiting run that `queue` did not tell stays
   untold when the holder's waits step does not tell it: a failed or refused
-  `review` skips the step, and a failure inside the step can leave some runs untold.
+  `review` skips the `waiters` job, and a failure inside the step can leave some
+  runs untold.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
-- A waiting run can be told more than once, by the queue step and `review`,
+- A waiting run can be told more than once, by `queue` and `waiters`,
   when the comments listing does not yet show an earlier reply.
+- A run that will not own its comment can be told it waits, by `queue` or
+  `waiters`, before its `review` reads the claim taken.
+- An unfinished `waiters` job keeps its run holding the group, so the next run
+  starts only once it ends, and a stale run whose `waiters` job is pending is not
+  cancelled. That lasts while the job waits for a runner, and while a lost
+  `waiters` runner goes unnoticed: GitHub ends that job after about 45 minutes.
+  The job holds `continue-on-error: true`, so a lost runner or a setup error fails
+  `waiters` and not the run.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -2246,9 +2369,10 @@ input without failing there.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-`apply.yml` re-reads `reviewDecision` itself, in `apply-run.yml`'s `review` job,
-rather than trusting a dispatch input, and that
-job is unconditional — the
+`apply.yml` re-reads `reviewDecision` itself, in `apply-run.yml`'s `review` and
+`detect` jobs, rather than trusting a dispatch input: `detect` decides on its own
+read, `lock` refuses unless `review` read the same, and `review`
+is unconditional — the
 default branch's `review: false` entries are the only source of this policy, and only
 engine-owned scripts read it.
 
@@ -2429,13 +2553,15 @@ reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <env> / <stack>`) — created pending by
-  `actions/summary`, completed by `actions/apply-complete` in
-  `apply-env-level.yml`'s `waveN-complete` jobs (none runs for a level's last
-  populated wave) and its `complete` job (all
-  bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
+  `actions/summary`, completed by `actions/cell-complete` in each cell's `save`
+  job in `cell.yml`, by `actions/apply-complete` in `apply-env-level.yml`'s
+  `complete` job, and by `apply-run.yml`'s `unflip` for
+  a first level whose call never started (all
+  bound to `shipmate-engine`) — creator and completers each mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
-  consistent). Release jobs flip them `in_progress` first. A completion sends
+  consistent). Release jobs, and `apply-run.yml`'s `lock` for the first
+  populated level's `wave0`, flip them `in_progress` first. A completion sends
   `output` only with the check's own summary, read back first, so the plan a
   changed cell's check was created with stays on it (§Apply check lifecycle).
 - **The aggregate gate** (`shipmate / gate`) — read and written only by
@@ -2492,11 +2618,20 @@ check/status/comment/issue that crosses a workflow-run boundary:
     an apply `summary` refreshes it, which greens it once every apply check is
     done and otherwise leaves it as it is, and fails the run over a hold; a
     deploy `summary` writes its deploy verdict. Its waiting cells keep their
-    apply checks pending, so no refresh greens the gate until they apply;
+    apply checks pending, so no refresh greens the gate until they apply. An
+    apply `summary` cancelled after its result comment posted refreshes no gate:
+    the gate keeps its last write until the next refresh, and `outcome` posts no
+    reply, since the comment posted. To refresh the gate, comment `shipmate apply`
+    again: once the command passes the apply requirements (§Comment-ops), its run's
+    `summary` refreshes the gate whenever `review` succeeds and admits the run,
+    even when no cell is pending. The comment step stops at 5 minutes, which leaves the gate refresh the
+    rest of the job's 15 minutes; a comment step stopped there after its POST
+    landed leaves `posted` unwritten, so `outcome` may post an ended reply beside
+    the result comment;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
     superseded deploy, unless a cell's apply check is titled `State not saved`
-    or its `save` job failed (`docs/troubleshooting.md`
+    or its `save` job's `Save the cell's state` step did not succeed (`docs/troubleshooting.md`
     §`The apply step ran and its state was not saved`).
 
   Plan runs of one head can write out of order. An older run's `summary` that
@@ -2547,11 +2682,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `apply-run.yml`'s `review` job and completed by it in `apply-run.yml`'s
   `summary` or `apply.yml`'s `outcome` job, all bound to `shipmate-engine`
   (§Apply run check).
-- **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `admit`
+- **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `queue`
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
 - **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
-  `review` job, bound to `shipmate-engine`, as a pull
+  `waiters` job, bound to `shipmate-engine`, as a pull
   request comment for each App-dispatched apply run with a command comment
   waiting behind the run that holds the queue. Its
   `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting
@@ -2637,7 +2772,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | Event | Job | Effect |
 | --- | --- | --- |
 | `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Refuses the whole run first when a cell it would apply is behind the base (§`apply_mode: auto`, Behind the base, bare and targeted). Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
-| the same run | `apply-run.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
+| the same run | `apply-run.yml` `lock`, after `review` and `detect` and before the first env-level | Refuses before any lock when `review` and `detect` read different review decisions (below). Locks every cell the env-levels will apply, then runs the first populated env-level's pre-flight and `wave0` release (§Apply check lifecycle, First level). A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
 | merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <env> / <stack>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
 | merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
@@ -2668,10 +2803,17 @@ re-plan. If #<n> has already merged or closed, comment `shipmate unlock <env>
 applies.
 This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
-cell pending and the rest apply. "Re-run all jobs" of a commented apply does
+cell pending and the rest apply. "Re-run all jobs" of a commented apply applies
 nothing: its claim finds the comment taken (§Comment-ops, "Reactions and the
 comment claim"). "Re-run failed jobs" does
 not re-run `detect`, so its `lock` tries the same cells again.
+
+The review decision has the same race: `review` and `detect` each read it, and
+`lock` compares the two, case-sensitive, before it takes any lock. When they
+differ or either is empty it refuses the run with ``the review decision changed
+while this run started (review read '<review decision>', detect read '<detect decision>');
+comment `shipmate apply` on the pull request again``, and no cell applies.
+Commenting `shipmate apply` again reads the decision afresh.
 
 **Limit: every env-level is locked up front.** `lock` acquires the cells of
 every env-level before `L0` starts. When an earlier level fails, the later
@@ -2679,12 +2821,13 @@ levels are skipped, and their cells stay locked to this pull request until it
 merges or closes, or another pull request evicts them with
 `shipmate unlock <env> --evict`.
 
-**Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed wave
-jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
-environment approval. So on every attempt each pre-merge apply cell first runs the
-pre-apply check, read-only, as the first step of the cell's `apply` job, before its cloud
-credentials. It refuses unless the pull request holds the cell's lock (an eviction,
-or a release after a close, takes it away), with
+**Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed
+wave jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours
+on an environment approval. So on every attempt each pre-merge apply cell first runs
+the pre-apply check, read-only, as the second step of the cell's `apply` job, after
+the App-key refusal and before its checkout and cloud credentials. It refuses unless
+the pull request holds the cell's lock (an eviction, or a release after a close, takes
+it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
 unless the pull request is open at the applied head, unless the run attempt is
@@ -2925,8 +3068,8 @@ or replies and ends `defer-auto` `success`.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
-`auto: true`; `detect` takes nothing else from the dispatch. `apply.yml`'s
-`guard` refuses a `verb: auto` dispatch whose calling job does not pass
+`auto: true`; `detect` takes nothing else from the dispatch. `apply.yml`
+refuses a `verb: auto` dispatch whose calling job does not pass
 `auto: true`, which would otherwise run it as a bare apply, `auto: true` on
 any other run, and a run without `auto: true` that is not a dispatch whose verb is
 exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares the `auto` job's `with:` against the
@@ -2962,10 +3105,10 @@ its command section instead, whatever `command_hints` is: ``<env> applies on its
 one per changed `auto` environment no other pull request locks
 (§Plan comment).
 
-**What an `auto` run applies.** It passes `apply.yml`'s `guard`, waits in its
+**What an `auto` run applies.** It passes `apply.yml`'s `run` condition, waits in its
 pull request's apply queue and passes `apply-run.yml`'s `review` as any apply
-dispatch does (§Comment-ops), then `detect` runs the bare form
-over the pending cells of the `auto` environments. Every other pending
+dispatch does (§Comment-ops). `detect`, which runs beside `review`, runs the
+bare form over the pending cells of the `auto` environments. Every other pending
 environment counts as not fully applying, so its `needs` successors are
 skipped. A pending environment that is neither `auto`, `targeted` nor held is
 left for a bare apply (`bare_envs`) and named in the result comment. Review
@@ -2980,8 +3123,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   slug, read here from the `app.slug` of the App-authored check runs on the
   head other than `shipmate / apply run` (the gate read takes it from its token
   mint, §Comment-ops, "The aggregate gate"); a head with no such check refuses. A
-  `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which the
-  `guard` job admits and this check refuses. A human's "Re-run all jobs" of an
+  `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which
+  `apply.yml`'s `run` condition passes and this check refuses. A human's "Re-run all jobs" of an
   `auto` run makes the human its triggering actor, so the re-run refuses;
   comment `shipmate apply` instead. "Re-run failed jobs" keeps the passed
   `detect`, so each wave cell's pre-apply check refuses any run attempt but
@@ -3222,8 +3365,8 @@ from it) binds the cell to its record only when it publishes before the cell's
 check: the cell then refuses with the changed-record text below. One that
 publishes later leaves the cell to apply the record `detect` bound. Nor
 is a plan run that ends between the apply comment and `detect`'s first listing
-(through `admit`, `review` and the wait for the pull request's earlier
-apply runs, unbounded behind an approval hold) waited for: `detect` binds the
+(through the wait for the pull request's earlier apply runs, unbounded behind
+an approval hold) waited for: `detect` binds the
 cells to its records, which the pre-apply check then finds unchanged. The base
 comparison is whole-branch, whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so any base merge, whatever stack it changed,
@@ -3542,11 +3685,11 @@ The nine jobs:
   it holds the App key only for a head `summary` would admit, except after a
   failed `facts` on an owned claim, when no head is known; it checks nothing
   out. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
-- **`apply.yml` / `apply-run.yml` / `apply-env-level.yml` /
+- **`apply.yml` / `apply-run.yml` / `apply-env-level.yml` / `cell.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (claiming the command comment, reading the review decision, telling the
-  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
+  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates, flipping wave checks to `in_progress` or returning them, completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks,
   re-planning the open pull requests a merge may put behind) are likewise bound
   to `shipmate-engine`.
@@ -3726,14 +3869,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-one, which run on
+  every engine job but twenty-six, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
-  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `admit` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and
+  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
+  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-one
+  for a runner. An account that cannot use `ubuntu-slim` leaves the twenty-six
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -4664,8 +4807,15 @@ and nothing minimizes it: every run's comment is new and stays visible, so a
 failure-then-retry sequence stays visible as separate comments rather than
 hiding the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply-run.yml`'s `review` job (the pull request closed, re-pushed or
-turned draft since the comment) posts no result comment and writes no gate; it
-posts the outcome reply, which links the run (§Outcome reply).
+turned draft since the comment) posts no result comment and writes no gate. It
+posts the outcome reply, which links the run, only when `review` admitted it: a
+refusal in a check step, a claim another run owns, a claim refused or failing
+before its reaction POST (its key check, token mint, or actor and id checks), a
+cancel before admission, a pull request `review` read as missing or not open,
+and a refused `auto` run post none. A claim whose reaction POST fails or answers
+anything but 200 or 201 posts its own ``🔴 failed: could not claim this command
+for its run`` reply instead (§Outcome reply; §Comment-ops, "Reactions and the
+comment claim").
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, an `auto` run's line
@@ -4711,12 +4861,12 @@ names an error. A job that failed without an `::error::` renders no fence.
   API call read `failed`, as does any other failed job. `cancelled` when no
   job failed and a job ended `cancelled`, whether the run was cancelled or
   only the job was (§Comment-ops names the causes). A run cancelled after
-  `review` succeeded posts its result comment with `cancelled`; `outcome`
-  replies only when the run was cancelled before `review` ended or the post
-  failed (§Outcome reply). `refused` and
-  `cancelled` always lead the counts. `failed` leads them when no row is
-  failed or blocked, so an apply run that dies before any cell reports (a
-  missing/denied apply environment) still surfaces a failure signal. A
+  `review` succeeded and admitted it posts its result comment with `cancelled`;
+  `outcome` replies only when the run was cancelled before `review` ended or the
+  post failed (§Outcome reply). `refused` and `cancelled` always lead the
+  counts. `failed` leads them when no row is failed or blocked, so an apply run
+  that dies before any cell reports (a missing/denied apply environment) still
+  surfaces a failure signal. A
   not-recorded row does not suppress it: it describes one cell in one
   environment and says nothing about a different environment whose job died
   before reporting. The circle is 🔴 for any outcome word, else the worst of
@@ -5060,17 +5210,24 @@ where `<url>` links the run that posts the reply and `<verb>` is `apply` or
 
 **Apply.** `outcome` sits in `apply.yml`, outside the pull request's apply
 queue (§Comment-ops, "One apply run per pull request"), and reads the inner run
-only through `apply-run.yml`'s outputs: `review_result`, `unbound`, `posted`,
-`summary_result` and `run_cancelled`, plus the `run` job's own result, which it folds into the `run-cancelled`
-input. `plan.yml` passes `actions/outcome-reply` the verb, the pull request and
+only through `apply-run.yml`'s outputs: the ownership `review` records,
+`review_result`, `unbound`, `posted`, `summary_result` and `run_cancelled`,
+which it passes as the `run-cancelled` input. `plan.yml` passes `actions/outcome-reply` the verb, the pull request and
 the `summary` result, with `run-cancelled` fixed to `false`; `apply.yml` also
-passes `review-result`, `environment` and a computed `run-cancelled`. An output
+passes `review-result`, `environment` and `run-cancelled`. An output
 that did not arrive reads empty: every one when the call was cancelled while it
 waited in the queue, and a job's own when that job never ran. A call that
 failed, or was cancelled after its jobs started, still passes the results and
-outputs of the jobs that finished. Empty never selects the refused text. `outcome` runs under `always()` when `guard`
-succeeded, which also means the run carries a canonical pull request number,
-`admit` admitted the run (or it is an `auto` run), and `summary` did not output `posted` as `true`.
+outputs of the jobs that finished. Empty never selects the refused text. `outcome` runs under `always()` when `review`
+recorded that this run owns the command (its claim read 201, or the run is `auto`), which also means
+the run passed every check of `apply.yml`, a canonical pull request number
+included, and `summary` did not output `posted` as `true`. So no reply is
+posted for a dispatch that `review`'s check steps or claim refuse (a failed claim
+posts its own reply), for a run whose claim reads taken, for a run cancelled
+while it waits in the queue or in `review` before the claim is recorded, or for a
+call that fails before `review` records the claim, for example a load-time error or
+a `review` runner lost before its outputs: the run is red, and its
+`shipmate / apply run` check, if created, stays `in_progress` (§Apply run check).
 `actions/apply-summary` writes `posted` only after its result comment's POST
 succeeded. `review` outputs `unbound` as `true` just before its two refusals
 that read the pull request as missing (a null `pullRequest`, or a query error
@@ -5080,19 +5237,17 @@ the conditions above hold for any other failed `review`, `outcome` runs with the
 refused text, and the reply still needs its own key check, mint and post. The reply is:
 
 - refused when `review` failed;
-- otherwise cancelled when `run-cancelled` is `true`: a job of
-  `apply-run.yml` other than `summary` ended `cancelled`, or the `run` job ended
-  `cancelled` or `skipped` and `review_result` is empty (the call was cancelled
-  while it waited in the queue, or skipped by a run cancel; a call that failed
-  before `review` reported gets the ended text);
+- otherwise cancelled when `run-cancelled` is `true`: `apply-run.yml`'s
+  `review`, `detect`, `lock` or `envlevel0` … `envlevel3` ended `cancelled`;
 - otherwise summary cancelled when `summary` ended `cancelled` and no other job
   did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
 
-`summary` runs after a run cancel once `review` succeeded, and posts the
-result, so the cancelled text appears only when the run was cancelled before
-`review` ended or `summary`'s post failed. One known limit: a cell cancelled at a full queue of
-its cell's concurrency group, in a run whose `summary` post failed, gets the cancelled
+`summary` runs after a run cancel once `review` succeeded and admitted the run,
+and posts the result, so the cancelled text appears only when the run was
+cancelled after `review` recorded the claim and before it ended, or `summary`'s
+post failed. One known limit: a cell cancelled at a full queue of its cell's
+concurrency group, in a run whose `summary` post failed, gets the cancelled
 text.
 
 After posting its reply, an apply run's `outcome` completes the run's
@@ -5813,9 +5968,9 @@ open pull requests the merge may put behind (§Plan comment); beside the
 env-levels, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
-apply path as `.github/workflows/apply.yml` (guard → admit →
-`apply-run.yml`, one run per pull request at a time: review → detect → cell lock acquisition →
-env-levels 0..3 via `apply-env-level.yml` → gate refresh + result comment;
+apply path as `.github/workflows/apply.yml` (guard on a refused dispatch; otherwise queue beside
+`apply-run.yml`, one run per pull request at a time: review, which claims the comment, beside detect, waiters after review → cell lock acquisition and the first level's pre-flight and wave0 release →
+env-levels 0..3 via `apply-env-level.yml` → unflip when the first level never started → result comment + gate refresh;
 then the outcome reply when no result comment posted; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one
 every pending `auto` environment in `needs` order), and the unlock path

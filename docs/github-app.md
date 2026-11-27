@@ -95,7 +95,10 @@ then stores two things:
 either: a repository secret is readable by any workflow on any branch, while the
 `shipmate-engine` environment secret §5 and §6 place the key in is scoped to one
 ref. That difference is the whole key-exposure boundary; §Key-exposure boundary
-states it in full.
+states it in full. A repository secret of that name, or an organization secret
+available to this repository, also reaches every cell's `apply` job, because the
+waves pass the key through, and every cell's `apply` job refuses at its first
+step, before checkout: keep the key only on `shipmate-engine`.
 
 Keep the `--out` file: §6 reads it for every consumer repository, and `gh`
 cannot read a secret's value back once set. Shred it once every repository has
@@ -133,8 +136,11 @@ boundary).
 
 `SHIPMATE_APP_PRIVATE_KEY` is a secret on this environment, never a repository
 or org secret. §Key-exposure boundary explains why that scoping is what keeps the
-key out of a branch-authored workflow. Create it once in your repository, with a
-deployment branch policy naming exactly the default branch — or run
+key out of a branch-authored workflow. A repository or org copy makes every
+cell's `apply` job refuse at its first step, after the environment's protection
+rules pass, before checkout. Create it once in
+your repository, with a deployment branch policy naming exactly the default
+branch — or run
 `scripts/onboard`, which creates it, scopes it, and does §6 as well
 ([`getting-started.md`](getting-started.md) §Quick path):
 
@@ -216,11 +222,12 @@ gh secret set SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" --env shipmate-engine \
 gh secret delete SHIPMATE_APP_PRIVATE_KEY --repo "$REPO" 2>/dev/null || true
 ```
 
-**Confirm the repository secret is gone.** Nothing else will tell you:
+**Confirm the repository secret is gone.** `shipmate doctor` cannot see it:
 listing a repository's secrets needs a permission the App manifest does not
-declare, so `shipmate doctor` cannot see this and reports all clear on a
-repository whose environment is shaped correctly while the key is still
-branch-readable (`docs/hardening.md` #16):
+declare, so doctor reports all clear on a repository whose environment is shaped
+correctly while the key is still branch-readable (`docs/hardening.md` #16).
+While that copy survives, every cell's `apply` job refuses at its first step and
+names the secret. Check now:
 
 ```bash
 gh secret list --repo "$REPO"
@@ -229,7 +236,8 @@ gh secret list --repo "$REPO"
 `SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
 under the environment (`gh secret list --repo "$REPO" --env shipmate-engine`).
 
-`SHIPMATE_APP_PRIVATE_KEY` cannot be set at organization level: environment
+`SHIPMATE_APP_PRIVATE_KEY` must not be an organization secret available to this
+repository: it would reach every cell's `apply` job, which refuses. Environment
 secrets are scoped to one repository's environment, so it is set per repository
 as above, and step 5 runs in every consumer repository.
 
@@ -280,9 +288,10 @@ as above, and step 5 runs in every consumer repository.
   `.github/workflows` (the contents API and a git-data tree both answer 403) and
   cannot move the default branch under its ruleset (422); probed 2026-10-24.
 - The App mints a fresh installation token per job and authors every
-  `apply / <env> / <stack>` check (create pending, completed after the wave
-  that applied its cell, or in the final `complete` job when that wave was
-  cancelled), the
+  `apply / <env> / <stack>` check (create pending, completed by the `save` job
+  of the cell that applied it, or by the level's `complete` job when a release
+  or wave of the level failed or was cancelled, or in `apply-run.yml`'s
+  `unflip` job when the first level never started), the
   `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
@@ -357,7 +366,7 @@ actual work here:
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request picks the environment its plan cells bind (`<env>-plan`, or the
   bare `<env>` for a `split: false` entry). Detect refuses the name
-  `shipmate-engine`, so no cell binds the engine's own environment. What makes
+  `shipmate-engine`, so no plan cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
   is named only in the `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
   none of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`

@@ -109,7 +109,9 @@ def test_a_200_is_taken_and_writes_nothing_on_the_pull_request(env):
     assert env.go() == 0
     assert env.posts == [_POST]
     assert env.outputs() == "state=taken\n"
-    assert env.summary() == "Another run of this comment owns it, so this run does no work.\n"
+    assert env.summary() == (
+        "Another run of this comment owns it, so this run plans or applies nothing.\n"
+    )
     assert env.replies == []
 
 
@@ -330,11 +332,11 @@ def test_attempt_one_reads_no_earlier_attempt(env, monkeypatch):
 
 
 def test_an_apply_claim_never_reads_earlier_attempts(env, monkeypatch):
-    """`apply.yml` passes no owner job; its re-run is refused anyway. Mutation: drop `owner and`
+    """`apply-run.yml` passes no owner job; its re-run is refused anyway. Mutation: drop `owner and`
     from the read condition (an empty owner then never matches, but the read happens)."""
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     env.answer = _TAKEN
-    env.pages = {_page(1): [{"name": "apply / admit", "conclusion": "success"}]}
+    env.pages = {_page(1): [{"name": "apply / run / review", "conclusion": "success"}]}
     assert env.go() == 0
     assert env.reads == []
     assert env.outputs() == "state=taken\n"

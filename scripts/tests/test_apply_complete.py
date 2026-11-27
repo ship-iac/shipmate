@@ -282,6 +282,39 @@ def test_a_saved_cell_writes_its_apply_jobs_outcome(apply, title):
     assert rows[0]["conclusion"] == title
 
 
+def _save_steps(state, write):
+    """A `save` job's raw listed steps: its state step, then its check write."""
+    return [
+        {"name": "Set up job", "conclusion": "success"},
+        {"name": "Save the cell's state", "conclusion": state},
+        {"name": "Complete this cell's apply check", "conclusion": write},
+        {"name": "Complete job", "conclusion": "success"},
+    ]
+
+
+def test_an_applied_cell_whose_state_was_saved_and_whose_write_failed_succeeds():
+    """The `save` job failed on its check write after its state step succeeded. Mutation:
+    `_decide` reads the `save` job's conclusion instead of `apply-gate.state_safe` -> APP
+    takes the failed `save` row."""
+    apply = job("L0 / dev-eu / stacks/app / apply", "success")
+    save = job(
+        "L0 / dev-eu / stacks/app / save", "failure", steps=_save_steps("success", "failure")
+    )
+    rows, unresolved = _classify([apply, save], {"wave1": BY_WAVE["wave1"]})
+    assert (rows, unresolved) == ([row(APP, [2, 3], apply)], [])
+
+
+def test_an_applied_cell_whose_state_step_failed_is_held():
+    """Mutation: `apply-gate.state_safe` reads any listed step success as saved -> APP
+    takes the `apply` row."""
+    apply = job("L0 / dev-eu / stacks/app / apply", "success")
+    save = job(
+        "L0 / dev-eu / stacks/app / save", "failure", steps=_save_steps("failure", "skipped")
+    )
+    rows, unresolved = _classify([apply, save], {"wave1": BY_WAVE["wave1"]})
+    assert (rows, unresolved) == ([held(APP, [2, 3])], [])
+
+
 def test_a_failed_save_of_a_cell_that_never_applied_fails_with_the_save_job():
     """The pre-apply check refused, so nothing applied, and the save failed. Mutation: take the
     `apply` job's row -> APP's job id is the `apply` job's."""
@@ -383,6 +416,46 @@ def test_a_cancelled_wave_keeps_its_listed_cells_rows():
     stopped = cell("L0 / dev-eu / stacks/app", "cancelled", steps=REFUSED)
     rows, _ = _classify(stopped, {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"})
     assert rows == [row(APP, [2, 3], stopped[0])]
+
+
+#: The first level's snapshot `lock` wrote: two wave0 checks and one wave1 check.
+UNFLIP_BY_WAVE = {"wave0": {DNS: [1], APP: [2, 3]}, "wave1": {WEB: [4]}}
+NOT_RUN = {"body": {"status": "queued"}, "title": "Not run"}
+
+
+def _unflip(jobs, attempt=1):
+    """The writes `apply-run.yml`'s `unflip` (check run id 950, under no level) decides."""
+    own = job("apply / run / unflip", None, jid=950, attempt=attempt)
+    rows, unresolved = apply_complete.classify(
+        UNFLIP_BY_WAVE, {"wave0": "skipped"}, [own, *jobs], "950"
+    )
+    return [w for r in rows for w in apply_complete.writes(r, "acme/demo")], unresolved
+
+
+def test_unflip_returns_the_first_levels_wave0_checks_not_run():
+    """`unflip` names no level and lists no cell row: each wave0 check returns to `queued`
+    titled `Not run`, and wave1's is not written. Mutation: `not_run` ignores a `skipped`
+    result -> both cells unresolved, nothing written."""
+    assert _unflip([]) == (
+        [{"id": 2, **NOT_RUN}, {"id": 3, **NOT_RUN}, {"id": 1, **NOT_RUN}],
+        [],
+    )
+
+
+def test_unflip_holds_a_cell_an_earlier_attempt_applied_and_did_not_save(run_env):
+    """The hold reads the cell's rows at any level and attempt. Mutations: drop the `ag.unsaved`
+    branch of `_decide` -> APP written `Not run`; `not_run` ignores a `skipped` result -> DNS
+    unresolved and unwritten."""
+    earlier = cell("apply / run / L0 / dev-eu / stacks/app", "success", "failure")
+    held_body = {"status": "in_progress", "details_url": HELD_URL}
+    assert _unflip(earlier, attempt=2) == (
+        [
+            {"id": 2, "body": held_body, "title": "State not saved", "held": True},
+            {"id": 3, "body": held_body, "title": "State not saved", "held": True},
+            {"id": 1, **NOT_RUN},
+        ],
+        [],
+    )
 
 
 def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
@@ -706,14 +779,16 @@ def test_plan_mode_writes_a_hold_over_an_earlier_failure(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "argv", [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"], ["stranded"]]
+    "argv",
+    [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"], ["stranded"], ["own", "[1]"]],
 )
 def test_a_wrong_argument_list_refuses(argv):
-    """Mutation: drop the length check -> `plan` with no files raises IndexError."""
+    """Mutation: drop the argument-count check -> `plan` with no files raises TypeError."""
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
     assert str(exc.value) == (
-        "::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]"
+        "::error::usage: apply-complete "
+        "[list | plan <rows> | stranded <reasons> | own <by_wave> <stack> <env> <job id>]"
     )
 
 

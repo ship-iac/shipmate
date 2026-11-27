@@ -31,6 +31,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/apply-detect@main
       - if: false
+        uses: ship-iac/shipmate/actions/apply-pr-read@main
+      - if: false
         uses: ship-iac/shipmate/actions/apply-queue@main
       - if: false
         uses: ship-iac/shipmate/actions/apply-release@main
@@ -48,6 +50,8 @@ jobs:
         uses: ship-iac/shipmate/actions/base-push-plan@main
       - if: false
         uses: ship-iac/shipmate/actions/build-matrix@main
+      - if: false
+        uses: ship-iac/shipmate/actions/cell-complete@main
       - if: false
         uses: ship-iac/shipmate/actions/cell-init@main
       - if: false

@@ -14,13 +14,13 @@ satisfies it, and the way a cell would actually regain the key -- a direct
 """
 
 import pytest
-import yaml
 from _loader import (
     ENGINE_ENVIRONMENT,
     WORKFLOWS,
     action_steps,
     action_yaml,
     checkouts,
+    secrets_refs,
     strings,
     workflow_jobs,
     workflow_yaml,
@@ -49,7 +49,7 @@ UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 PLAN_KEY_HOLDERS = ("claim", "defer", "defer-auto", "summary", "gate-hold", "outcome")
 #: Every job with steps in apply.yml that references the App key, hand-written. `run` passes it
 #: to `apply-run.yml` and runs no step of its own.
-APPLY_KEY_HOLDERS = ("admit", "outcome")
+APPLY_KEY_HOLDERS = ("queue", "outcome")
 
 
 @pytest.mark.parametrize("action", CELLS)
@@ -75,31 +75,46 @@ def test_cell_never_references_the_app_private_key(action):
         assert APP_KEY_ENV not in text, f"{action} references {APP_KEY_ENV}: {text!r}"
 
 
-def test_only_snapshot_and_completion_jobs_read_the_app_key():
-    """The release jobs count as completion jobs here. None checks out repository content; every
-    wave does.
+def test_every_level_job_passes_or_reads_the_app_key():
+    """`snapshot`, the releases and `complete` read it, none checking out repository content;
+    every wave passes it to `cell.yml`, whose `apply` reads it only to refuse
+    (`test_the_cell_workflow_reaches_the_app_key_only_in_these_steps`).
 
-    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave4-complete`'s; remove
-    `wave2-release`'s; map `SHIPMATE_APP_PRIVATE_KEY` in `wave0`'s `&cell-secrets`.
+    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave2-release`'s.
     """
-    # Parse, do not string-split: the secret stays declared at the top of the file, because the
-    # these jobs consume it and test_gate_name_consistency requires reusable targets called
-    # with `secrets: inherit` to declare it. A textual "not in" assertion checks the wrong thing.
-    reading = {n for n, job in workflow_jobs(LEVEL).items() if APP_KEY_ENV in yaml.safe_dump(job)}
+    reading = {
+        n
+        for n, job in workflow_jobs(LEVEL).items()
+        if f"secrets.{APP_KEY_ENV}" in secrets_refs(job)
+    }
     assert reading == {
         "snapshot",
         "complete",
-        *(f"wave{n}-complete" for n in range(7)),
         *(f"wave{n}-release" for n in range(8)),
+        *(f"wave{n}" for n in range(8)),
     }
 
 
-def test_the_cell_workflow_never_reaches_the_app_key():
-    """`cell.yml`'s `apply` runs pull-request code and its `save` writes the state entry; neither
-    writes a check, so the file names the App key nowhere, a declaration included. Mutation:
-    declare `SHIPMATE_APP_PRIVATE_KEY` under its `on.workflow_call.secrets`."""
-    text = yaml.safe_dump(workflow_yaml("cell.yml"))
-    assert APP_KEY_ENV not in text
+#: The only steps of `cell.yml` that reference the App key, by job: `apply`'s refusal, which
+#: reads it only to fail when it arrives, and `save`'s check write.
+CELL_KEY_STEPS = {
+    "apply": ["Refuse an apply job that holds the App key"],
+    "save": ["Complete this cell's apply check"],
+}
+
+
+def test_the_cell_workflow_reaches_the_app_key_only_in_these_steps():
+    """`cell.yml` declares the key optional, and every other step of either job, `apply`'s
+    pull-request code included, names it nowhere. Mutations: pass the key to the apply-cell
+    step's `with:`; add it to the `Pre-apply check` step's `env:`; declare it
+    `required: true`; drop the refusal step's `env:`."""
+    doc = workflow_yaml("cell.yml")
+    found = {
+        name: [s.get("name") for s in job["steps"] if f"secrets.{APP_KEY_ENV}" in secrets_refs(s)]
+        for name, job in doc["jobs"].items()
+    }
+    declared = doc["on"]["workflow_call"]["secrets"][APP_KEY_ENV]
+    assert (found, declared) == (CELL_KEY_STEPS, {"required": False})
 
 
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
@@ -128,7 +143,7 @@ def test_plan_workflow_key_holders_are_exactly_these_and_check_out_nothing():
 
 def test_apply_workflow_key_holders_are_exactly_these_and_check_out_nothing():
     """A key holder that checks out runs the dispatched ref's content beside the key. Mutations:
-    add an `actions/checkout` step to `admit`; pass the key to `guard`."""
+    add an `actions/checkout` step to `queue`; pass the key to `guard`."""
     jobs = workflow_jobs(WORKFLOWS / "apply.yml")
     holders = tuple(
         n for n, j in jobs.items() if "steps" in j and any(APP_KEY_ENV in s for s in strings(j))
@@ -151,8 +166,8 @@ def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     assert "shipmate-engine" not in str(job.get("environment", ""))
 
 
-def test_snapshot_and_completion_jobs_are_the_only_jobs_naming_the_engine_environment():
-    """Mutations: drop `snapshot`'s `environment:` binding; drop `wave6-complete`'s; drop
+def test_snapshot_release_and_complete_jobs_are_the_only_level_jobs_naming_the_engine_env():
+    """Mutations: drop `snapshot`'s `environment:` binding; drop `complete`'s; drop
     `wave1-release`'s."""
     # Parsed, not a `text.count(...) == 1` textual check: that form is satisfied by any single
     # job naming the environment, so moving it onto wave0, which runs tofu over branch content,
@@ -161,24 +176,21 @@ def test_snapshot_and_completion_jobs_are_the_only_jobs_naming_the_engine_enviro
     named = {
         n for n, j in workflow_jobs(LEVEL).items() if "shipmate-engine" in str(j.get("environment"))
     }
-    assert named == {
-        "snapshot",
-        "complete",
-        *(f"wave{n}-complete" for n in range(7)),
-        *(f"wave{n}-release" for n in range(8)),
-    }
+    assert named == {"snapshot", "complete", *(f"wave{n}-release" for n in range(8))}
 
 
 #: Every (workflow, job) binding `shipmate-engine`, hand-written. Each holds the App key.
 ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "snapshot"),
-    *(("apply-env-level.yml", f"wave{n}-complete") for n in range(7)),
     *(("apply-env-level.yml", f"wave{n}-release") for n in range(8)),
     ("apply-env-level.yml", "complete"),
+    ("cell.yml", "save"),
     ("apply-run.yml", "review"),
+    ("apply-run.yml", "waiters"),
     ("apply-run.yml", "lock"),
+    ("apply-run.yml", "unflip"),
     ("apply-run.yml", "summary"),
-    ("apply.yml", "admit"),
+    ("apply.yml", "queue"),
     ("apply.yml", "outcome"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),

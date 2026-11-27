@@ -477,7 +477,7 @@ gate greening over an unapplied stack.
 
 **A retry is not a re-plan, and the pending check makes the retry look
 available.** A failed apply leaves its `apply / <env> / <stack>` check *pending*
-rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for that
+rather than failed, so the next apply's check snapshot accepts a fresh `shipmate apply <env>` for that
 cell — the right recovery when nothing moved (a credentials failure, a rate limit,
 a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
@@ -497,7 +497,7 @@ error normally means the state moved rather than that the wrong plan was chosen.
 The dispatched apply workflow refuses in its `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply refused: the
 dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request
-instead of running a direct workflow_dispatch` — its `review` job refuses a
+instead of running a direct workflow_dispatch` — its `review` and `detect` jobs each refuse a
 `ref` that is not the open pull request's current head, and
 comment-ops reads the plan run each `apply / <env> / <stack>` check on the pull
 request's current head records, refusing the command when that head names none.
@@ -695,10 +695,12 @@ stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
-The apply run stopped in its `snapshot` job, before any wave, and the error names
+The apply run stopped in its pre-flight, before any wave: `lock` for an apply
+run's first populated env-level, `snapshot` for a later level or a merge
+deploy. The error names
 every environment the applies would have bound that the repository does not have.
 
-Why `snapshot` refuses instead of warning: GitHub creates a missing environment
+Why the pre-flight refuses instead of warning: GitHub creates a missing environment
 on demand, with no reviewers, no wait timer and no deployment branch policy, and
 the apply then runs inside it. An existing environment with no branch policy is
 open the same way: a workflow on any branch can bind it. Nothing else catches
@@ -1395,13 +1397,32 @@ to a GitHub-hosted label, or move the stack to a remote backend
 (`CONTRACT.md` §State backend). When a cell's `save` job prints the same text,
 its apply may have run: follow §`The apply step ran and its state was not saved`.
 
+### `reaches pull-request code in this apply job`
+
+A cell's `apply` job refused at its first step,
+`Refuse an apply job that holds the App key`, because a secret named
+`SHIPMATE_APP_PRIVATE_KEY` reached it: from the environment it binds
+(`<env>-apply`, or the bare `<env>` under `split: false`), or from a
+repository or organization secret, which every wave passes to the cell. A
+repository- or organization-scoped key makes every `apply` refuse. The step
+ran before any pull-request code, printed no value, and applied nothing.
+Delete the secret where it is:
+`gh secret delete SHIPMATE_APP_PRIVATE_KEY --env <binding> --repo <owner>/<repo>`,
+or without `--env` for a repository secret, or with `--org <org>` for an
+organization secret. Keep the key only on `shipmate-engine`
+(`docs/github-app.md` §5–6), then apply again: comment `shipmate apply`, or
+re-run the merge deploy.
+
 ### `The apply step ran and its state was not saved`
 
 An apply cell on a local backend may have run its `Apply the stored plan` step
 (status `success`, `failure` or `cancelled`, or a job that ended before the
-step reported), and its state is not known saved. The cell's `save` job failed
-or was cancelled. A failed `save` job's `::error::` ends with this section's
-name, in one of these forms:
+step reported), and its state is not known saved: the cell's `save` job did not
+report its `Save the cell's state` step `success`. The step failed, or the job
+was cancelled or lost its runner before it, or GitHub rejected the job before
+its first step under `shipmate-engine`'s deployment branch policy or protection
+rules. A failed `Save the cell's state` step's `::error::` ends with this
+section's name, in one of these forms:
 
 - ``the state of <env> / <stack> was not found under <key> or <key>-r1. ...``:
   the save under the cell's key, and the save under the same key with `-r1`,
@@ -1430,6 +1451,14 @@ shipmate never saves, so the steps below do not apply. Return or complete its
 check as in
 [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand).
 
+A cell on any backend is held too when its `save` job ends, or is rejected,
+before `Save the cell's state` reports `success`.
+
+A `save` job that fails after `Save the cell's state` succeeded, at
+`Complete this cell's apply check`, saved the state; this section does not
+apply. Its check write failed, so the wave fails, later waves and environment
+levels do not start, and the level's `complete` job writes the check `success`.
+
 A `save` job whose apply never ran saves nothing and succeeds. When an earlier
 attempt may have applied the cell without saving, a re-run's `save` job looks
 up that attempt's two keys, never saves them, and fails when neither exists. The state the apply left stays, sealed, in the run's
@@ -1443,10 +1472,10 @@ holds only its own head: after a push, an apply of the new head, another pull
 request's apply and a merge deploy of a later head do not see it, and apply the
 cell over the state from before the lost apply. Return or complete it as in
 [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
-only when the steps below say so; nothing else clears it. An apply run that was
-not cancelled posts an apply comment whose `state not saved:` note names the
-cell and links its `save` job's log. A cancelled run and the merge deploy post
-no comment: the held check and the `save` job log are the signal.
+only when the steps below say so; nothing else clears it. An apply run, a
+cancelled one included, posts an apply comment whose `state not saved:` note
+names the cell and links its `save` job's log. The merge deploy posts no
+comment: the held check and the `save` job log are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
@@ -1876,7 +1905,7 @@ error that stopped it. Run the command locally to see the whole output.
 
 ### `shipmate / gate` never goes green
 
-Five distinct causes, in the order worth checking.
+Six distinct causes, in the order worth checking.
 
 **No gate status was written at all, as opposed to a red or held one.** The
 engine's `summary` job is skipped on a fork pull request — there is no gate, no
@@ -1922,6 +1951,13 @@ check under a name no current cell reconstructs (a renamed or deleted stack)
 therefore holds the gate indefinitely. GitHub has no way to delete a check run, so the recovery is a
 new head SHA: push a commit, and the plan run re-creates only the checks that
 exist now.
+
+**The gate is pending over apply checks that are all done.** An apply run's
+`summary` cancelled after it posted the result comment refreshes no gate.
+Comment `shipmate apply` again: once the command passes the apply requirements,
+its run's `summary` refreshes the gate whenever `review` succeeds and admits the
+run, even when no cell is pending (`CONTRACT.md` §Comment-ops, "The aggregate
+gate").
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
 description telling you what to do, or `pending` reading "Plan run <id> holds
@@ -2051,8 +2087,8 @@ Which review decision refuses a targeted apply, and which environments a bare
 apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops (the `review: false` rules).
 
-**The apply failed with `could not determine the PR's review decision`.** The
-decision did not reach `detect`, or is a value the engine does not know. Every
+**The apply failed with `could not determine the PR's review decision`.**
+GitHub returned a review decision the engine does not know. Every
 apply form fails before it reads a check and applies nothing. Check the pinned
 engine version, then comment the same `shipmate apply` command again; for an
 `auto` apply, push again or comment `shipmate apply`.
@@ -2280,12 +2316,14 @@ request's current head commit is the dispatched `ref`, compared whole. A push
 landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
-A run refused or cancelled in `review`, or cancelled while it waited in the
-pull request's apply queue, posts no apply comment and leaves the gate as it
-was. It posts a `🔴` reply on the pull request instead, which links
-the run: `its review check stopped the apply run before any cell
-applied` for a refusal, `the apply run was cancelled before it posted a
-result` for a cancel (`CONTRACT.md` §Outcome reply).
+A run refused or cancelled in `review` after it claimed the command posts no
+apply comment and leaves the gate as it was. It posts a `🔴` reply on the pull
+request instead, which links the run: `its review check stopped the apply run
+before any cell applied` for a refusal, `the apply run was cancelled before it
+posted a result` for a cancel. A run cancelled while it waited in the pull
+request's apply queue, or in `review` before its claim was recorded, posts no
+reply of its own after the cancel; its `queue` job may already have posted a
+waits reply. Comment `shipmate apply` again (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it posted, for example
 at a full gate-writer queue for the head, also posts no apply comment. It
@@ -2516,7 +2554,7 @@ drift sweep reports that state.
 
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
-The `guard` job of `apply.yml` refused the dispatch before the run joined any
+`apply.yml` skipped `run`, and its `guard` job refused the dispatch before the run joined any
 apply queue, and nothing applied. The dispatch's `pr_number` is not 1 to 10
 digits without a leading zero. shipmate's comment-ops and autoplan never send
 such a number, and a hand-made dispatch is refused earlier by the bot-actor
@@ -2526,7 +2564,7 @@ App. Find that workflow or App and stop it dispatching `shipmate.yml`; comment
 
 ### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
 
-The `guard` job of `apply.yml` refused the autoplan's dispatch because the
+`apply.yml` skipped `run`, and its `guard` job refused the autoplan's dispatch because the
 `auto` job in `shipmate.yml` does not pass `auto: true`. Without it the run
 would be a bare apply with none of the `auto` checks. Nothing applied. Give the
 `auto` job the published `with:` block (`auto: true`, `ref`, `pr_number`,
@@ -2850,12 +2888,15 @@ reason. On every form it refuses when:
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
   were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
-  check and its completion jobs write only successes, since a later run may have
+  check and its completion jobs write only successes and held checks, since a later run may have
   completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
-  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
-  and the cell refuses on the attempt number. Otherwise a commented apply's claim
-  finds its comment taken and the run does nothing, and an `auto` run refuses at
+  re-run is allowed. "Re-run all jobs" reaches this check only when no earlier
+  attempt reacted and the claim can pass: the claim failed on its key, its token
+  mint or a transient write before its reaction landed, or the run was cancelled
+  before `review` claimed. The re-run's claim then answers 201, and the cell
+  refuses on the attempt number. A claim refused on its actor fails again at
+  `review` on every re-run, so no cell starts. Otherwise a commented apply's claim
+  finds its comment taken and the run applies nothing, and an `auto` run refuses at
   `detect` (`a re-run of an auto apply never applies`).
 
 An `auto` cell also refuses when:
@@ -3112,38 +3153,41 @@ the run stopped (`CONTRACT.md` §Comment-ops, "Reactions and the comment
 claim"):
 
 - 👀 and no 🚀: no run claimed the command. An apply run's `guard` refused it,
-  the run failed at startup, its `claim` job (`admit` in an apply run) failed
-  at the App key check or token mint (no reply is possible there), or every job
-  was skipped
-  (§A dispatched verb produced a run in which every job was skipped).
+  the run failed at startup, its claim (the `claim` job, or the claim step of
+  `review` in an apply run) failed at the App key check or token mint (no reply
+  is possible there), or every job was skipped
+  (§A dispatched verb produced a run in which every job was skipped). An apply
+  run claims only once it leaves its pull request's apply queue: one still
+  waiting behind an earlier apply run shows `pending` in the API and claims when
+  it starts, and one cancelled while it waited never claims and posts nothing
+  (`CONTRACT.md` §Comment-ops, "One apply run per pull request"); comment
+  `shipmate apply` again.
 - 👀 and 🚀: a run owns the command, and its `outcome` job shows why it did not
   answer: skipped (`CONTRACT.md` §Outcome reply lists when), failed at its key
   check or token mint, or green with a `could not post the no-result reply`
-  warning. An apply run that has not ended may still wait behind an earlier
-  apply run of the same pull request: the API reports its status as `pending`
-  while it waits, and it answers once it runs (`CONTRACT.md` §Comment-ops, "One
-  apply run per pull request"). A commented apply whose `admit` runner was lost
-  after the 🚀 shows `apply / admit` failed and skips `run` and `outcome`:
-  comment `shipmate apply` again.
+  warning. A commented apply whose `review` runner was lost after the 🚀, or
+  that was cancelled after the 🚀 and before `review` recorded the claim, skips
+  `outcome` and posts nothing: comment `shipmate apply` again.
 
-A run whose `claim` job (`admit` in an apply run) summary says another run of
-this comment owns it did no work by design; the run that owns the comment answers. "Re-run all jobs" of the
+A run whose claim (the `claim` job, or `review` in an apply run) summary says another run of
+this comment owns it planned or applied nothing by design; the run that owns the comment answers. An
+apply run's `detect`, `queue` and `waiters` jobs still run, and `queue` can still post a queue reply. "Re-run all jobs" of the
 plan run that owns the comment plans again, because GitHub deleted that run's
-plan artifacts; of a run that lost the claim it does nothing.
+plan artifacts; of a run that lost the claim it plans or applies nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
-`guard` names its refusal in an `apply refused:` annotation; a failed `claim`, `admit`,
+`guard`, or a `review` or `queue` whose check step refused, names its refusal in an `apply refused:` annotation; a failed `claim`,
 `facts` or `review` names it in its job log. A startup failure shows on the run
 page with no jobs started, with GitHub's error for the workflow file.
 
 ### `could not claim this command for its run, so the command was not started`
 
 The pull request carries ``🔴 failed: could not claim this command for its run,
-so the command was not started. Comment it again.``. The dispatched run's `claim`
-job (`admit` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
+so the command was not started. Comment it again.``. The dispatched run's claim
+(the `claim` job, or `review` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
 than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
-claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
+claim also fails when it cannot list an earlier attempt's jobs. The run planned or applied nothing; the job log names
 the answer. Comment the command again. Re-running a `shipmate plan` run
 instead can also start it, so do one or the other, not both; a re-run of an
 apply run applies no cell (`CONTRACT.md` §Comment-ops, "Reactions and the
@@ -3156,16 +3200,27 @@ once that run and any run queued before this one end. The reply links the run
 it waits behind. That run may itself wait on an `<env>-apply` environment's
 approval: approve or reject it there, or cancel it from its run page, to let
 this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
+A run that will not own its command, such as a second run of the same comment,
+can get this reply before it reads the claim taken; it then applies nothing and
+posts no result or outcome reply, and ends red when its `detect` refuses, for
+example after a "Re-run all jobs" once the pull request merged. Its `queue` job
+can still cancel stale runs and post a waits reply. When its claim reads taken,
+its `waiters` job can tell the runs waiting behind it while it holds the queue;
+a refused claim fails `review` and runs no `waiters` job.
 
 ### `waits for the apply run of this pull request to finish`
 
 The run holding this pull request's apply queue posted this comment on the
 pull request. It links the waiting run, the apply command comment that started
-it, and the holding run. It comes from the holding run's `review` job, so
+it, and the holding run. It comes from the holding run's `waiters` job, so
 it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
-cancelled from that run's page.
+cancelled from that run's page. A waiting run that will not own its command
+gets this reply too; once it starts it applies nothing and posts no result or
+outcome reply, though its own `waiters` job can tell the runs waiting behind it
+when its claim reads taken (a refused claim fails `review` and runs none), and
+it ends red when its `detect` refuses.
 
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 
@@ -3190,7 +3245,7 @@ the current head's, which carries its own apply checks.
 The list of this pull request's apply runs failed or came back malformed, or a
 run the shipmate App dispatched carries a title outside the grammar in
 `CONTRACT.md` §Check names, so this run cancelled nothing and cannot say what it
-waits behind; the `admit` job's log has the warning. When it happens on every
+waits behind; the `queue` job's log has the warning. When it happens on every
 apply, `shipmate.yml`'s `run-name` is not the published one: re-pin it with
 `python <engine>/scripts/repin <consumer> <tag> --write-fence`, after reading the
 diff it prints. The run still starts once the apply queue frees.
@@ -3300,10 +3355,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-three jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `admit` and `outcome`,
-`apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
-`wave0-complete` … `wave6-complete` and `complete`, `deploy.yml` `summary` and `replan`,
+All twenty-nine jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
+`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`
+and `complete`, `cell.yml` `save`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
@@ -3362,7 +3417,8 @@ another run holds in progress; follow the remedy that sentence names.
 ### An apply check never completes after a successful apply
 
 The apply itself succeeded, but the `apply / <env> / <stack>` check stays
-pending and the trailing completion job failed.
+pending and the job that completes it, the cell's `save` job or the level's
+`complete` job, failed.
 
 The `shipmate-engine` environment's deployment branch policy names a branch that
 does not exist — a typo, or a repository whose default branch is not `main`. A
@@ -3371,6 +3427,8 @@ policy naming a nonexistent branch fails closed: the completion job is denied
 check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
+Then, for a cell whose `save` job the policy rejected, which saved no state,
+follow §`The apply step ran and its state was not saved`.
 
 ### `waiting 60 s for GitHub's secondary rate limit, then retrying: command failed (1): gh api ...`
 
@@ -3507,8 +3565,8 @@ The annotation starts `deploy refused:` and names, per cause, the cells with
 an apply check `in_progress` under a run other than this deploy, the newest or an
 older one under a newer re-plan check. It ends
 naming every other pending cell of the merge, which the refused deploy does not
-apply either. A release job flips a cell's check to `in_progress` with a link to
-its run, and that run's completion writes it again. A gate-bypassing merge while
+apply either. A release job flips a cell's check to `in_progress` with a link to its run (in an
+apply run, `lock` flips the first populated level's `wave0` instead), and that run's completion writes it again. A gate-bypassing merge while
 that run is live, or a run that ended before its completion wrote the check,
 leaves the check `in_progress` on the merged head. The deploy reads the linked
 run before it applies the cell: a live run may still apply it, and an ended one

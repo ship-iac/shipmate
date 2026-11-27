@@ -3,8 +3,8 @@ request still holds the cell's lock and is open at the applied head, the base ti
 detect read, the cell's newest plan record still names the wave row's plan run and digest, and,
 under the auto form, the plan run detect bound is still the head's newest autoplan. A wave can
 wait hours on an environment approval, and "Re-run failed jobs" re-runs a failed wave without
-its `detect` and `lock` jobs. The check is the first step of `cell.yml`'s `apply`, before the
-cloud credentials. The merge deploy passes the merged pull request (empty on a push) with
+its `detect` and `lock` jobs. The check follows only the App-key refusal in `cell.yml`'s `apply`,
+before the cloud credentials. The merge deploy passes the merged pull request (empty on a push) with
 `deploy` true and the job's check run id, and the check then refuses only a lock another pull
 request holds or, on a re-run, a cell an earlier attempt may have applied without saving its
 state. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
@@ -101,7 +101,7 @@ def test_the_cell_checks_first_and_refuses_through_apply_cell():
     (cell,) = [s for s in steps if str(s.get("uses", "")).endswith("apply-cell")]
     found = (
         apply["permissions"],
-        steps[0],
+        steps[1],
         cell.get("if"),
         {k: v for k, v in cell["with"].items() if k.startswith("pre-apply")},
     )
@@ -128,12 +128,17 @@ def test_the_cell_checks_out_the_head_without_persisting_the_token():
 
 def test_the_cell_references_exactly_these_secrets():
     """`apply` runs pull request code, so every secret it references reaches that code; `save`
-    references none. The App key's absence is `test_cells_hold_no_app_key.py`'s. Mutation: an
-    `env: { K: ${{ secrets.SHIPMATE_VARS }} }` on the apply-cell step."""
+    references only the App key. Which steps name the App key is
+    `test_cells_hold_no_app_key.py`'s. Mutation: an `env: { K: ${{ secrets.SHIPMATE_VARS }} }`
+    on the apply-cell step."""
     jobs = workflow_jobs("cell.yml")
     assert {j: secrets_refs(jobs[j]) for j in ("apply", "save")} == {
-        "apply": ["secrets.SHIPMATE_ENCRYPTION_KEY", "secrets.SHIPMATE_SECRETS"],
-        "save": [],
+        "apply": [
+            "secrets.SHIPMATE_APP_PRIVATE_KEY",
+            "secrets.SHIPMATE_ENCRYPTION_KEY",
+            "secrets.SHIPMATE_SECRETS",
+        ],
+        "save": ["secrets.SHIPMATE_APP_PRIVATE_KEY"],
     }
 
 

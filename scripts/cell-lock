@@ -1206,8 +1206,8 @@ def _verify_cmd(repo, _, run):
         _verify_earlier_attempts(repo, env, stack, where, run)
         return
     head, auto, provenance, base, plan_run, digest = _wave_inputs(where)
-    # "Re-run failed jobs" reuses the passed detect, skipping its actor check, and a re-run's
-    # release and completion jobs write nothing: a later run may have completed the same checks.
+    # "Re-run failed jobs" reuses the passed detect, skipping its actor check. A re-run's release
+    # writes nothing and its completion only successes and holds (`patch-checks`).
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
     if attempt != "1":
         raise SystemExit(

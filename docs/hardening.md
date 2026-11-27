@@ -15,20 +15,21 @@ engine counts (row 3), submits no App review and
 completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
 — but the gate's verdict is still computed from artifacts the branch's own plan
 run produced (see "What none of this fixes"). It can still dispatch the apply
-and unlock verbs with its own `GITHUB_TOKEN`, which the `guard` jobs of
-`apply.yml` and `unlock.yml` admit as a bot actor. The apply dispatch is bound
-to a pull request: the `review` job refuses it unless the pull request is open,
+and unlock verbs with its own `GITHUB_TOKEN`, which `apply.yml`'s `run` job
+and `unlock.yml`'s `guard` job pass as a bot actor. The apply dispatch is bound
+to a pull request: the `review` and `detect` jobs each refuse it unless the pull request is open,
 not a draft, from this repository, and its head commit is the dispatched `ref`,
 and detect refuses a cell whose apply check records another pull request or
 none (`CONTRACT.md` §Comment-ops). An apply dispatch that passes `review`
 holds its pull request's apply queue for its whole run, so the pull request's
 other apply runs wait behind it; sending one needs write access to the
 repository. Any bot-actor apply dispatch with a canonical `pr_number` takes a
-slot in that queue once `guard` passes, before `review` runs, so a flood of 101
-such dispatches into an idle group (one runs, 100 wait), or 100 behind a run
-already holding it, makes a real `shipmate apply` arrive at a full queue and be
+slot in that queue once `run`'s condition passes it, before `review` claims its
+comment or refuses it, and holds the queue while its `detect` runs before it
+ends, so a flood of 101 such dispatches into an idle group (one runs, 100
+wait), or 100 behind a run already holding it, makes a real `shipmate apply` arrive at a full queue and be
 cancelled. Both the flood and the single held run need write access to the
-repository. `apply.yml`'s `admit` job never cancels such a run: it cancels only
+repository. `apply.yml`'s `queue` job never cancels such a run: it cancels only
 runs whose `actor` is the shipmate App's bot login, and it writes nothing, no
 cancel and no reply, unless its own run's `actor` and `triggering_actor` are both
 that login; its reply names such a run as one shipmate did not dispatch.
@@ -39,7 +40,7 @@ login, and writes under the same rule for its own run (`CONTRACT.md`
 with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
 needs only write access and runs the same init over a pull request head; write
 access and the `<env>-apply` environment's reviewers bound both. It can also
-dispatch `verb: auto`, which `guard` admits and `detect` refuses: an `auto` run
+dispatch `verb: auto`, which `run`'s condition passes and `detect` refuses: an `auto` run
 must run as the shipmate App's own bot login, compared whole, and a
 `GITHUB_TOKEN` dispatch runs as `github-actions[bot]` (`CONTRACT.md`
 §`apply_mode: auto`).
@@ -516,7 +517,7 @@ approval is only as good as that habit.
 A deployment branch policy on `<env>-apply`, scoped to the default branch,
 does not change *which code the engine applies* — the pre-merge apply is
 always dispatched on the default branch and applies the pull request head
-passed as an input, which the `review` job requires to be the open pull
+passed as an input, which the `review` and `detect` jobs require to be the open pull
 request's current head, policy or not. It is a control on secret release. Without
 one, a branch-authored workflow that declares `environment: dev-eu-apply` in its
 own YAML is handed that environment's secrets directly on push, bypassing
@@ -940,15 +941,18 @@ and on demand; it cannot check the third:
   on any branch without naming anything, so leaving one in place defeats this
   control completely — the environment becomes decoration.
 
-That third condition is the one to be careful about, because it is invisible.
-Listing a repository's secrets needs a `secrets` permission `app/manifest.json`
-does not declare, so the probe can only observe the environment's *shape*. A
-repository that keeps the key as a repository secret after creating the
-environment ends up with the key still branch-readable and `shipmate doctor`
-reporting all clear.
-Delete it as the last step of `docs/github-app.md` §6, and confirm with
-`gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
-appear there.
+That third condition is the one to be careful about, because doctor cannot see
+it. Listing a repository's secrets needs a `secrets` permission
+`app/manifest.json` does not declare, so the probe can only observe the
+environment's *shape*. A repository that keeps the key as a repository or
+organization secret after creating the environment has the key still
+branch-readable and `shipmate doctor` reporting all clear. While that copy
+survives, every cell's `apply` job refuses at its first step and names the
+secret.
+Delete it as the last step of `docs/github-app.md` §6, delete any organization
+copy too, and confirm with `gh secret list --repo <owner>/<repo>` and
+`gh secret list --org <org>` (or the organization's secrets settings page):
+`SHIPMATE_APP_PRIVATE_KEY` must appear in neither.
 
 A repository with no `shipmate-engine` environment — the other way to regress
 this — has nothing scoping the key; if the key is a repository secret, any
@@ -1262,7 +1266,19 @@ cells, and each cell binds one GitHub Environment, the bound environment:
 bare `<env>` on both paths when the environment's entry holds `split: false`.
 The bound environment's required reviewers, secrets, variables and OIDC subject
 apply to the cell. None of the three binds `shipmate-engine`, so none holds the
-App key (§16).
+App key (§16). An apply cell's `apply` job refuses at its first step, before
+any pull-request code runs, when a `SHIPMATE_APP_PRIVATE_KEY` secret reaches
+it: from its bound environment, or from a repository or organization secret,
+which every wave passes to the cell. A repository- or organization-scoped key
+therefore makes every `apply` refuse.
+
+The cell's `save` job, in the same `cell.yml` call, binds `shipmate-engine`
+and holds the App key to complete the cell's apply check. It checks out nothing
+and runs no pull-request code. It runs on the cell's `runs_on` runner class
+right after the cell's `apply` job ran providers and provisioners from the pull
+request on that class. On a GitHub-hosted runner each job gets a fresh machine.
+On a reused self-hosted runner, whatever the `apply` job left on the machine
+runs beside the key.
 
 | Job | Runs without anyone's approval when | Holds |
 |---|---|---|
@@ -1273,8 +1289,8 @@ App key (§16).
 The pull-request condition is the review decision GitHub reports for the pull
 request. `scripts/authorize` reads it when `shipmate apply` is commented and
 refuses there any decision the list below does not admit; `apply-run.yml`'s
-`review` job reads it again in the apply run, and `scripts/apply-detect`
-decides on that value. The decision admits an apply to an environment when it
+`review` and `detect` jobs each read it again in the apply run, `scripts/apply-detect`
+decides on `detect`'s value, and `lock` refuses unless the two agree. The decision admits an apply to an environment when it
 is:
 
 - `APPROVED`. The engine checks no freshness of its own: whether a push after

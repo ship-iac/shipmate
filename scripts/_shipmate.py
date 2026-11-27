@@ -1014,7 +1014,7 @@ def pr_head(repo, pr, run=run):
     return sha, draft, state
 
 
-def check_runs(repo, sha, jq=".check_runs[]", run=None, name=None):
+def check_runs(repo, sha, jq=".check_runs[]", run=None, name=None, *, counted=False):
     """Every check-run on `sha`, or only those named `name`, as `gh api --jq` output: one `jq`
     projection per line.
 
@@ -1022,12 +1022,25 @@ def check_runs(repo, sha, jq=".check_runs[]", run=None, name=None):
     re-created check name keeps its older runs and `apply-gate` judges the newest per name, so
     every reader must see the same set. `--paginate --jq` prints one JSON object per line
     across every page, so a head with more than 100 checks drops none. `run` defaults to
-    `_run`. A transient failure is retried (`retried`)."""
+    `_run`. A transient failure is retried (`retried`).
+
+    `counted` lists through `_pages` instead, one JSON object per check run, and raises an
+    `::error::` when the listing fails or holds fewer rows than its `total_count`, or runs
+    past `_MAX_PAGES` pages (1,000 checks); `_pages`' warning above it names the cause. It
+    serves only the `.check_runs[]` projection and refuses any other `jq` before a call."""
     validate_head_sha(sha, "head SHA")
-    query = "filter=all&per_page=100"
-    if name is not None:
-        query += f"&check_name={urllib.parse.quote(name, safe='')}"
-    args = ["gh", "api", "--paginate", f"repos/{repo}/commits/{sha}/check-runs?{query}", "--jq", jq]
+    path = f"repos/{repo}/commits/{sha}/check-runs?filter=all"
+    query = "" if name is None else f"&check_name={urllib.parse.quote(name, safe='')}"
+    if counted:
+        if jq != ".check_runs[]":
+            raise SystemExit(
+                f"::error::a counted check-run listing serves only .check_runs[] (got {jq!r})"
+            )
+        rows = _pages(path + query, "check_runs", run, counted=True)
+        if rows is None:
+            raise SystemExit(f"::error::the check-run listing on {sha} is incomplete")
+        return "".join(json.dumps(r) + "\n" for r in rows)
+    args = ["gh", "api", "--paginate", f"{path}&per_page=100{query}", "--jq", jq]
     return retried(lambda: (run or _run)(args))
 
 
