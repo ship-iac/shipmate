@@ -58,7 +58,7 @@ def test_plan_body_is_the_dispatch_ref_the_verb_the_pr_number_and_the_comment():
     comment_id}}. `verb` is what selects the `plan` job in `shipmate.yml`; without it every
     job's `if:` is false and the dispatched run completes having done nothing. The top-level ref
     is the dispatch ref rather than the head SHA, because a plan states no head. `comment_id` is
-    what the run claims, so a second run of one comment does no work.
+    what the run claims, so a second run of one comment plans nothing.
 
     Mutations: drop the `verb` key; add `ref` or `environment` to the plan inputs; swap the
     top-level ref for the head SHA; drop `return_run_details`, which every body carries so the

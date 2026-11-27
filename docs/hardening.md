@@ -949,9 +949,10 @@ organization secret after creating the environment has the key still
 branch-readable and `shipmate doctor` reporting all clear. While that copy
 survives, every cell's `apply` job refuses at its first step and names the
 secret.
-Delete it as the last step of `docs/github-app.md` §6, and confirm with
-`gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
-appear there.
+Delete it as the last step of `docs/github-app.md` §6, delete any organization
+copy too, and confirm with `gh secret list --repo <owner>/<repo>` and
+`gh secret list --org <org>` (or the organization's secrets settings page):
+`SHIPMATE_APP_PRIVATE_KEY` must appear in neither.
 
 A repository with no `shipmate-engine` environment — the other way to regress
 this — has nothing scoping the key; if the key is a repository secret, any

@@ -109,7 +109,9 @@ def test_a_200_is_taken_and_writes_nothing_on_the_pull_request(env):
     assert env.go() == 0
     assert env.posts == [_POST]
     assert env.outputs() == "state=taken\n"
-    assert env.summary() == "Another run of this comment owns it, so this run does no work.\n"
+    assert env.summary() == (
+        "Another run of this comment owns it, so this run plans or applies nothing.\n"
+    )
     assert env.replies == []
 
 

@@ -3169,7 +3169,7 @@ A run whose claim (the `claim` job, or `review` in an apply run) summary says an
 this comment owns it planned or applied nothing by design; the run that owns the comment answers. An
 apply run's `detect`, `queue` and `waiters` jobs still run, and `queue` can still post a queue reply. "Re-run all jobs" of the
 plan run that owns the comment plans again, because GitHub deleted that run's
-plan artifacts; of a run that lost the claim it does nothing.
+plan artifacts; of a run that lost the claim it plans or applies nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed

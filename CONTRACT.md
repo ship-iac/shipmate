@@ -2150,10 +2150,10 @@ and every wave skip.
 
 `detect` does not wait for `review`, so a `review` that fails on its App token
 alone does not stop it. On a commented apply the claim runs the first key check
-and mint, before `review` admits the run, so their failure posts no reply. A
-failure after admission (the second key check and mint, an error from the
-pull-request read) gets the outcome reply, so a bare or targeted apply can still
-wait up to 8 minutes for plan runs before `outcome` replies. This limit is accepted: the wait is read-only.
+and mint, before `review` admits the run, so their failure posts no reply. On a
+commented apply, a failure after admission (the second key check and mint, an
+error from the pull-request read) gets the outcome reply, so a bare or targeted
+apply can still wait up to 8 minutes for plan runs before `outcome` replies. This limit is accepted: the wait is read-only.
 
 An apply run is cancelled by a manual cancel (the Actions UI or `gh run
 cancel`). GitHub cancels the run's call into `apply-run.yml` when the call
@@ -4805,9 +4805,11 @@ hiding the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply-run.yml`'s `review` job (the pull request closed, re-pushed or
 turned draft since the comment) posts no result comment and writes no gate. It
 posts the outcome reply, which links the run, only when `review` admitted it: a
-refusal in a check step or by the claim, a cancel before admission, a pull
-request `review` read as missing or not open, and a refused `auto` run post none
-(§Outcome reply).
+refusal in a check step, a claim another run owns, a cancel before admission, a
+pull request `review` read as missing or not open, and a refused `auto` run post
+none. A claim that fails posts its own ``🔴 failed: could not claim this command
+for its run`` reply instead (§Outcome reply; §Comment-ops, "Reactions and the
+comment claim").
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, an `auto` run's line

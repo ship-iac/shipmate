@@ -174,7 +174,7 @@ def claim(repo, comment):
         write_outputs(state="owned")
     elif status == "200":
         write_outputs(state="taken")
-        line = "Another run of this comment owns it, so this run does no work."
+        line = "Another run of this comment owns it, so this run plans or applies nothing."
         print(f"::notice::{line}")
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
             fh.write(f"{line}\n")
