@@ -53,10 +53,10 @@ request (an argument, an empty `SHIPMATE_APP_SLUG`, a missing or unexpected `COM
 
 Known ceilings: a run not listed yet when the listing is last read is not seen, so that attempt
 can be retried and start twice; a second commented `plan` or `apply` run loses its comment's
-claim and does no work, a second comment-less `plan` plans the head again, and a second `unlock`
-finds no lock. Every comment-less plan of one pull request has the same title, so another one
-landing in the window (the summary's replan beside the deploy's re-plan) stops the retry too;
-either plans the pull request's head. A runner clock ahead of GitHub's by more than five
+claim and plans or applies nothing, a second comment-less `plan` plans the head again, and a
+second `unlock` finds no lock. Every comment-less plan of one pull request has the same title, so
+another one landing in the window (the summary's replan beside the deploy's re-plan) stops the
+retry too; either plans the pull request's head. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, for the dispatches bounded by `t0` (`auto` and a
 comment-less plan). A commented dispatch's title match takes no time bound, but its paging stops
 at the first page holding a run created before `t0`, so under that skew its run is missed too

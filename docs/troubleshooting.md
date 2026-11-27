@@ -1472,10 +1472,10 @@ holds only its own head: after a push, an apply of the new head, another pull
 request's apply and a merge deploy of a later head do not see it, and apply the
 cell over the state from before the lost apply. Return or complete it as in
 [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
-only when the steps below say so; nothing else clears it. An apply run that was
-not cancelled posts an apply comment whose `state not saved:` note names the
-cell and links its `save` job's log. A cancelled run and the merge deploy post
-no comment: the held check and the `save` job log are the signal.
+only when the steps below say so; nothing else clears it. An apply run, a
+cancelled one included, posts an apply comment whose `state not saved:` note
+names the cell and links its `save` job's log. The merge deploy posts no
+comment: the held check and the `save` job log are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
@@ -2887,12 +2887,12 @@ reason. On every form it refuses when:
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
   were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
-  check and its completion jobs write only successes, since a later run may have
+  check and its completion jobs write only successes and held checks, since a later run may have
   completed those checks already. Comment `shipmate apply`. A merge deploy's
   re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
   attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
   and the cell refuses on the attempt number. Otherwise a commented apply's claim
-  finds its comment taken and the run does nothing, and an `auto` run refuses at
+  finds its comment taken and the run applies nothing, and an `auto` run refuses at
   `detect` (`a re-run of an auto apply never applies`).
 
 An `auto` cell also refuses when:
@@ -3166,9 +3166,10 @@ claim"):
   `outcome` and posts nothing: comment `shipmate apply` again.
 
 A run whose claim (the `claim` job, or `review` in an apply run) summary says another run of
-this comment owns it did no work by design; the run that owns the comment answers. "Re-run all jobs" of the
+this comment owns it planned or applied nothing by design; the run that owns the comment answers. An
+apply run's `detect`, `queue` and `waiters` jobs still run, and `queue` can still post a queue reply. "Re-run all jobs" of the
 plan run that owns the comment plans again, because GitHub deleted that run's
-plan artifacts; of a run that lost the claim it does nothing.
+plan artifacts; of a run that lost the claim it plans or applies nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
@@ -3182,7 +3183,7 @@ The pull request carries ``🔴 failed: could not claim this command for its run
 so the command was not started. Comment it again.``. The dispatched run's claim
 (the `claim` job, or `review` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
 than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
-claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
+claim also fails when it cannot list an earlier attempt's jobs. The run planned or applied nothing; the job log names
 the answer. Comment the command again. Re-running a `shipmate plan` run
 instead can also start it, so do one or the other, not both; a re-run of an
 apply run applies no cell (`CONTRACT.md` §Comment-ops, "Reactions and the

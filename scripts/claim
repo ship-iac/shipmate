@@ -11,9 +11,11 @@ GitHub answers the first creation of a reaction 201 and every later one 200, nam
 existing reaction, so exactly one run of a comment reads 201:
 
 - 201 writes the step output `state=owned`, and the run proceeds.
-- 200 writes `state=taken` and a job summary line. The run does no work and writes nothing on
-  the pull request. One exception: "re-run all jobs" deletes the earlier attempts' artifacts,
-  so a plan run that owned the comment must plan again. With `SHIPMATE_OWNER_JOB` set (`plan.yml`
+- 200 writes `state=taken` and a job summary line. A plan run does no work and writes nothing
+  on the pull request; an apply run applies nothing and posts no result comment or outcome
+  reply, though `apply-run.yml`'s `detect`, `waiters` and `apply.yml`'s `queue` still run.
+  One exception: "re-run all jobs" deletes the earlier attempts' artifacts, so a plan run
+  that owned the comment must plan again. With `SHIPMATE_OWNER_JOB` set (`plan.yml`
   passes `facts`, the job the claim gates) and `GITHUB_RUN_ATTEMPT` above 1, a 200 reads every
   earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded `success`,
   `failure` or `timed_out` ran, so this run owned the comment and it writes `state=owned`. Any
@@ -28,7 +30,7 @@ existing reaction, so exactly one run of a comment reads 201:
   started and to comment it again, then exits 1. A reply that fails only warns.
 
 The POST is sent once: a retried POST that had landed reads 200, which would leave the comment
-claimed by a run that does nothing.
+claimed by a run that plans or applies nothing.
 
 `--display` (`unlock.yml`'s `guard`, with the job token): POSTs the reaction when `COMMENT_ID`
 is a comment id and writes nothing otherwise. A failed POST only warns, and no output is
@@ -172,7 +174,7 @@ def claim(repo, comment):
         write_outputs(state="owned")
     elif status == "200":
         write_outputs(state="taken")
-        line = "Another run of this comment owns it, so this run does no work."
+        line = "Another run of this comment owns it, so this run plans or applies nothing."
         print(f"::notice::{line}")
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
             fh.write(f"{line}\n")
