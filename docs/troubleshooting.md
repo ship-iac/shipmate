@@ -1955,7 +1955,7 @@ exist now.
 **The gate is pending over apply checks that are all done.** An apply run's
 `summary` cancelled after it posted the result comment refreshes no gate.
 Comment `shipmate apply` again: once the command passes the apply requirements,
-its run's `summary` refreshes the gate whenever `review` succeeds, even when no
+its run's `summary` refreshes the gate whenever `review` succeeds and admits the run, even when no
 cell is pending (`CONTRACT.md` §Comment-ops, "The aggregate gate").
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
