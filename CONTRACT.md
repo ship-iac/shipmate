@@ -3689,7 +3689,7 @@ The nine jobs:
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (claiming the command comment, reading the review decision, telling the
-  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates (`lock` for an apply run's first populated env-level, `snapshot` for every other level), flipping wave checks to `in_progress` (`lock` for that first level's `wave0`, the release jobs for every other wave) or returning them (`unflip`), completing apply checks, refreshing the gate, posting the apply result
+  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates, flipping wave checks to `in_progress` or returning them, completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks,
   re-planning the open pull requests a merge may put behind) are likewise bound
   to `shipmate-engine`.

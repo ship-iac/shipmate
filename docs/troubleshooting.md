@@ -3565,8 +3565,8 @@ The annotation starts `deploy refused:` and names, per cause, the cells with
 an apply check `in_progress` under a run other than this deploy, the newest or an
 older one under a newer re-plan check. It ends
 naming every other pending cell of the merge, which the refused deploy does not
-apply either. In an apply run, `lock` flips the first populated level's `wave0` checks
-to `in_progress` and a release job every other wave's, each with a link to its run, and that run's completion writes it again. A gate-bypassing merge while
+apply either. A release job flips a cell's check to `in_progress` with a link to its run (in an
+apply run, `lock` flips the first populated level's `wave0` instead), and that run's completion writes it again. A gate-bypassing merge while
 that run is live, or a run that ended before its completion wrote the check,
 leaves the check `in_progress` on the merged head. The deploy reads the linked
 run before it applies the cell: a live run may still apply it, and an ended one

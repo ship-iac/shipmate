@@ -20,13 +20,15 @@ therefore cannot reorder its own apply waves or drop its own exclusion.
 `MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
 Bumping it needs, per new level N:
 - `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
-  actions/apply-detect/action.yml;
-- the same two slots in the `detect` job `outputs:` of .github/workflows/apply-run.yml
-  and .github/workflows/deploy.yml, and an `envlevelN` job in each, named `L<N>`;
-- an `envlevelN-waves` input on apply-run.yml's `summary` step and on
-  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line;
-- a `first_level == 'N'` selector in apply-run.yml's `waves-json` of `lock`'s `verify` and
-  `snap` steps and `unflip`'s `resnap` step, and in `unflip`'s `if:`.
+  actions/apply-detect/action.yml, and the '0' to '3' range in apply-detect's `first_level`
+  description;
+- in .github/workflows/apply-run.yml and .github/workflows/deploy.yml, a level-N copy of every
+  `envlevel3` and `first_level == '3'` site: the `detect` outputs, an `envlevelN` job named
+  `L<N>` with its `by_wave` selector, the `needs:` entries of `unflip` and `summary`, `lock`'s
+  `envlevelN-waves` input and `waves-json` selectors, and `unflip`'s `if:` and `resnap`;
+- an `envlevelN-waves` input, with its `SHIPMATE_ENVLEVELN_WAVES` env line, on
+  actions/lock-acquire/action.yml and actions/apply-summary/action.yml;
+- the `range(4)` over `SHIPMATE_ENVLEVEL<n>_WAVES` in scripts/cell-lock.
 
 A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
 It runs nothing on import -- it only defines functions and constants.

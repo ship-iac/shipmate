@@ -6,7 +6,7 @@ on:
     secrets:
       # `required: false`, as drift.yml and the apply path declare it: the key lives on the
       # `shipmate-engine` environment this job binds, so a required declaration rejects the call.
-      # A repository-scoped key is unsupported: every apply cell refuses it.
+      # A repository- or organization-scoped key is unsupported: every cell's `apply` job refuses it.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
 # Floor, not a default to inherit from: see plan.yml.
 permissions: {}
