@@ -4805,9 +4805,11 @@ hiding the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply-run.yml`'s `review` job (the pull request closed, re-pushed or
 turned draft since the comment) posts no result comment and writes no gate. It
 posts the outcome reply, which links the run, only when `review` admitted it: a
-refusal in a check step, a claim another run owns, a cancel before admission, a
-pull request `review` read as missing or not open, and a refused `auto` run post
-none. A claim that fails posts its own ``🔴 failed: could not claim this command
+refusal in a check step, a claim another run owns, a claim refused or failing
+before its reaction POST (its key check, token mint, or actor and id checks), a
+cancel before admission, a pull request `review` read as missing or not open,
+and a refused `auto` run post none. A claim whose reaction POST fails or answers
+anything but 200 or 201 posts its own ``🔴 failed: could not claim this command
 for its run`` reply instead (§Outcome reply; §Comment-ops, "Reactions and the
 comment claim").
 
