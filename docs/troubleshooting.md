@@ -2890,8 +2890,9 @@ reason. On every form it refuses when:
   were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
   check and its completion jobs write only successes and held checks, since a later run may have
   completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
-  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
+  re-run is allowed. "Re-run all jobs" reaches this check only when no earlier
+  attempt reacted: its claim failed before its reaction landed, or the run was
+  cancelled before `review` claimed. The re-run's claim then answers 201,
   and the cell refuses on the attempt number. Otherwise a commented apply's claim
   finds its comment taken and the run applies nothing, and an `auto` run refuses at
   `detect` (`a re-run of an auto apply never applies`).
