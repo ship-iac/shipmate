@@ -236,7 +236,8 @@ gh secret list --repo "$REPO"
 `SHIPMATE_APP_PRIVATE_KEY` must not appear in that output; it should appear only
 under the environment (`gh secret list --repo "$REPO" --env shipmate-engine`).
 
-`SHIPMATE_APP_PRIVATE_KEY` cannot be set at organization level: environment
+`SHIPMATE_APP_PRIVATE_KEY` must not be an organization secret available to this
+repository: it would reach every cell's `apply` job, which refuses. Environment
 secrets are scoped to one repository's environment, so it is set per repository
 as above, and step 5 runs in every consumer repository.
 

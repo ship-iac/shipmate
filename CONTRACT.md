@@ -2098,8 +2098,9 @@ the group, whether or not it will own its comment: a second run of a comment,
 or a `[bot]` dispatch the claim refuses, waits its turn, then holds the group
 while `detect` runs, read-only, and ends having applied nothing. It posts no
 result or outcome reply, but its `queue` job can still cancel stale runs and post
-a waits reply, and while it holds the group its `waiters` job can tell the runs
-waiting behind it. Its `detect` still refuses as any run's does, so such a run can
+a waits reply. A second run of a comment, whose claim reads taken, also runs
+`waiters` while it holds the group, which can tell the runs waiting behind it; a
+refused claim fails `review`, so `waiters` does not run. Either run's `detect` still refuses as any run's does, so such a run can
 end red, for example when "Re-run all jobs" re-runs it after the pull request merged. No bound on that hold is claimed: it covers `detect`'s runner
 pickup, checkout, setup and wait for plan runs, and a lost `detect` runner holds
 it until GitHub ends the job. A run cancelled while it waits never reached its

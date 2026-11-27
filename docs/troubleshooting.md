@@ -2890,9 +2890,12 @@ reason. On every form it refuses when:
   were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
   check and its completion jobs write only successes and held checks, since a later run may have
   completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
-  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
-  and the cell refuses on the attempt number. Otherwise a commented apply's claim
+  re-run is allowed. "Re-run all jobs" reaches this check only when no earlier
+  attempt reacted and the claim can pass: the claim failed on its key, its token
+  mint or a transient write before its reaction landed, or the run was cancelled
+  before `review` claimed. The re-run's claim then answers 201, and the cell
+  refuses on the attempt number. A claim refused on its actor fails again at
+  `review` on every re-run, so no cell starts. Otherwise a commented apply's claim
   finds its comment taken and the run applies nothing, and an `auto` run refuses at
   `detect` (`a re-run of an auto apply never applies`).
 
@@ -3201,8 +3204,9 @@ A run that will not own its command, such as a second run of the same comment,
 can get this reply before it reads the claim taken; it then applies nothing and
 posts no result or outcome reply, and ends red when its `detect` refuses, for
 example after a "Re-run all jobs" once the pull request merged. Its `queue` job
-can still cancel stale runs and post a waits reply, and while it holds the queue
-its `waiters` job can tell the runs waiting behind it.
+can still cancel stale runs and post a waits reply. When its claim reads taken,
+its `waiters` job can tell the runs waiting behind it while it holds the queue;
+a refused claim fails `review` and runs no `waiters` job.
 
 ### `waits for the apply run of this pull request to finish`
 
@@ -3214,8 +3218,9 @@ one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
 cancelled from that run's page. A waiting run that will not own its command
 gets this reply too; once it starts it applies nothing and posts no result or
-outcome reply, though its own `waiters` job can tell the runs waiting behind it,
-and it ends red when its `detect` refuses.
+outcome reply, though its own `waiters` job can tell the runs waiting behind it
+when its claim reads taken (a refused claim fails `review` and runs none), and
+it ends red when its `detect` refuses.
 
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 
