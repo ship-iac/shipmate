@@ -1595,11 +1595,12 @@ how far a command got:
   none.
 - 🚀 (`rocket`): a run claimed the command. On `plan` and `apply` the shipmate
   App writes it from `plan.yml`'s `claim` job or the claim step of
-  `apply-run.yml`'s `review` job, and it decides whether that run locks, applies and
-  replies (below). On `unlock`, `unlock.yml`'s `guard` writes it
-  with the job token, so it shows as `github-actions[bot]`'s, after its actor
-  check and only for a `comment_id` that is a comment id; it is display only and
-  gates nothing, since a second `unlock` finds no lock.
+  `apply-run.yml`'s `review` job, and it decides whether a plan run does any
+  work, and whether an apply run locks, applies and posts its result comment or
+  outcome reply (below). On `unlock`, `unlock.yml`'s `guard` writes it with the
+  job token, so it shows as `github-actions[bot]`'s, after its actor check and
+  only for a `comment_id` that is a comment id; it is display only and gates
+  nothing, since a second `unlock` finds no lock.
 
 A 👀 that cannot be posted is ignored; an `unlock` 🚀 that cannot be posted
 warns.
@@ -1705,16 +1706,17 @@ five seconds before the first attempt. What stops the retry depends on the
 dispatch:
 
 - A comment's dispatch and a comment-less `plan` read every page of 100 runs,
-  newest first, back to `t0`, and read again each second until 10 seconds
-  after the failed attempt. Each stops at a `workflow_dispatch` run whose
-  `actor` is the App's `<slug>[bot]` and whose title (§Check names) is this
-  dispatch's: this verb and comment id, with this pull request, or for `unlock`
-  no pull request and this ref. A comment-less plan's title carries no comment
-  id and is shared by every comment-less plan of the pull request, so its run
-  must also be created at or after `t0`; a comment id makes a title unique, so a
-  commented dispatch's run needs no time bound. Otherwise it retries: the claim
-  (above) leaves a second `plan` run doing nothing and a second `apply` run applying nothing, a second
-  comment-less plan plans the head again, and a second `unlock` finds no lock. Without the App's slug no run can be told to be this
+  newest first, back to `t0`, and read again each second until 10 seconds after
+  the failed attempt. Each stops at a `workflow_dispatch` run whose `actor` is
+  the App's `<slug>[bot]` and whose title (§Check names) is this dispatch's:
+  this verb and comment id, with this pull request, or for `unlock` no pull
+  request and this ref. A comment-less plan's title carries no comment id and is
+  shared by every comment-less plan of the pull request, so its run must also be
+  created at or after `t0`; a comment id makes a title unique, so a commented
+  dispatch's run needs no time bound. Otherwise it retries: under the claim
+  (above) a second `plan` run does nothing and a second `apply` run applies
+  nothing; a second comment-less plan plans the head again; and a second
+  `unlock` finds no lock. Without the App's slug no run can be told to be this
   dispatch's, so the dispatch is refused before it is sent. Every comment-less
   plan of one pull request has the same title, so the plan `summary`'s replan
   and the merge deploy's re-plan landing in one window stop each other's
@@ -2818,12 +2820,13 @@ levels are skipped, and their cells stay locked to this pull request until it
 merges or closes, or another pull request evicts them with
 `shipmate unlock <env> --evict`.
 
-**Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed wave
-jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
-environment approval. So on every attempt each pre-merge apply cell first runs the
-pre-apply check, read-only, as the second step of the cell's `apply` job, after the App-key refusal and before
-its checkout and cloud credentials. It refuses unless the pull request holds the cell's lock (an eviction,
-or a release after a close, takes it away), with
+**Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed
+wave jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours
+on an environment approval. So on every attempt each pre-merge apply cell first runs
+the pre-apply check, read-only, as the second step of the cell's `apply` job, after
+the App-key refusal and before its checkout and cloud credentials. It refuses unless
+the pull request holds the cell's lock (an eviction, or a release after a close, takes
+it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
 unless the pull request is open at the applied head, unless the run attempt is
@@ -4857,12 +4860,12 @@ names an error. A job that failed without an `::error::` renders no fence.
   API call read `failed`, as does any other failed job. `cancelled` when no
   job failed and a job ended `cancelled`, whether the run was cancelled or
   only the job was (§Comment-ops names the causes). A run cancelled after
-  `review` succeeded and admitted it posts its result comment with `cancelled`; `outcome`
-  replies only when the run was cancelled before `review` ended or the post
-  failed (§Outcome reply). `refused` and
-  `cancelled` always lead the counts. `failed` leads them when no row is
-  failed or blocked, so an apply run that dies before any cell reports (a
-  missing/denied apply environment) still surfaces a failure signal. A
+  `review` succeeded and admitted it posts its result comment with `cancelled`;
+  `outcome` replies only when the run was cancelled before `review` ended or the
+  post failed (§Outcome reply). `refused` and `cancelled` always lead the
+  counts. `failed` leads them when no row is failed or blocked, so an apply run
+  that dies before any cell reports (a missing/denied apply environment) still
+  surfaces a failure signal. A
   not-recorded row does not suppress it: it describes one cell in one
   environment and says nothing about a different environment whose job died
   before reporting. The circle is 🔴 for any outcome word, else the worst of
@@ -5239,10 +5242,11 @@ refused text, and the reply still needs its own key check, mint and post. The re
   did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
 
-`summary` runs after a run cancel once `review` succeeded and admitted the run, and posts the
-result, so the cancelled text appears only when the run was cancelled after
-`review` recorded the claim and before it ended, or `summary`'s post failed. One known limit: a cell cancelled at a full queue of
-its cell's concurrency group, in a run whose `summary` post failed, gets the cancelled
+`summary` runs after a run cancel once `review` succeeded and admitted the run,
+and posts the result, so the cancelled text appears only when the run was
+cancelled after `review` recorded the claim and before it ended, or `summary`'s
+post failed. One known limit: a cell cancelled at a full queue of its cell's
+concurrency group, in a run whose `summary` post failed, gets the cancelled
 text.
 
 After posting its reply, an apply run's `outcome` completes the run's

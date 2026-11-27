@@ -429,9 +429,9 @@ jobs:
 
   summary:
     needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3, unflip]
-    # No App comment and no gate write when a `pr_number` review reads as missing or not open, an `auto`
-    # run is refused at review (both red runs), or the claim reads `taken`. Keyed on `review`: a
-    # `detect` failure after a bound review still gets both, as a failed or cancelled apply does.
+    # No summary result comment and no gate write when a `pr_number` review reads as missing or not
+    # open, an `auto` run is refused at review (both red runs), or the claim reads `taken`. Keyed on
+    # `review`: a `detect` failure after a bound review gets both, like a failed or cancelled apply.
     if: ${{ always() && needs.review.result == 'success' && needs.review.outputs.admitted == 'true' }}
     runs-on: ubuntu-slim
     # One gate writer per head at a time, across the plan, apply and deploy runs.
