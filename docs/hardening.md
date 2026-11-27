@@ -941,12 +941,14 @@ and on demand; it cannot check the third:
   on any branch without naming anything, so leaving one in place defeats this
   control completely — the environment becomes decoration.
 
-That third condition is the one to be careful about, because it is invisible.
-Listing a repository's secrets needs a `secrets` permission `app/manifest.json`
-does not declare, so the probe can only observe the environment's *shape*. A
-repository that keeps the key as a repository secret after creating the
-environment ends up with the key still branch-readable and `shipmate doctor`
-reporting all clear.
+That third condition is the one to be careful about, because doctor cannot see
+it. Listing a repository's secrets needs a `secrets` permission
+`app/manifest.json` does not declare, so the probe can only observe the
+environment's *shape*. A repository that keeps the key as a repository or
+organization secret after creating the environment has the key still
+branch-readable and `shipmate doctor` reporting all clear. While that copy
+survives, every cell's `apply` job refuses at its first step and names the
+secret.
 Delete it as the last step of `docs/github-app.md` §6, and confirm with
 `gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
 appear there.

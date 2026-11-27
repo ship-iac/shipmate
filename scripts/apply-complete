@@ -11,7 +11,7 @@ whose `apply` job `<job id>` succeeded and whose state is saved, for that cell's
 
 Evidence is `GET /actions/runs/{id}/jobs?filter=all`, not the cells' own artifacts: a job
 conclusion is written by GitHub, so one cell cannot claim another applied. A cell lying about
-itself by exiting 0 is irreducible and is the trust level the per-cell completion already had.
+itself by exiting 0 is irreducible and is the trust level of every per-cell completion.
 
 A cell's jobs are `<level> / <env> / <stack> / apply` and `... / save` (`apply-gate.cell_rows`),
 `<level>` being this job's own (`SHIPMATE_JOB_ID`, this job's check run id, names it), so a

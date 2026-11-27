@@ -15,7 +15,7 @@ inputs:
     description: The command comment's id, the dispatch's `comment_id`.
     required: true
   owner-job:
-    description: The job id the claim gates (`plan.yml` passes `facts`). Empty, as `apply.yml` leaves it, never reads earlier attempts.
+    description: The job id the claim gates (`plan.yml` passes `facts`). Empty, as `apply-run.yml`'s `review` leaves it, never reads earlier attempts.
     required: false
     default: ""
   app-id:
