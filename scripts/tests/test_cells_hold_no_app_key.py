@@ -39,7 +39,7 @@ TOKEN_MINTERS = (
 
 APP_KEY_ENV = "SHIPMATE_APP_PRIVATE_KEY"
 
-LEVEL = WORKFLOWS / "apply-env-level.yml"
+STAGE = WORKFLOWS / "stage.yml"
 
 PLAN_WF = WORKFLOWS / "plan.yml"
 #: Every job in plan.yml that runs repository content. The key holders are absent: they hold
@@ -75,24 +75,20 @@ def test_cell_never_references_the_app_private_key(action):
         assert APP_KEY_ENV not in text, f"{action} references {APP_KEY_ENV}: {text!r}"
 
 
-def test_every_level_job_passes_or_reads_the_app_key():
-    """`snapshot`, the releases and `complete` read it, none checking out repository content;
-    every wave passes it to `cell.yml`, whose `apply` reads it only to refuse
+def test_every_stage_job_passes_or_reads_the_app_key():
+    """`entry` and `complete` read it, neither checking out repository content; `cell` passes it
+    to `cell.yml`, whose `apply` reads it only to refuse
     (`test_the_cell_workflow_reaches_the_app_key_only_in_these_steps`).
 
-    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave2-release`'s.
+    Mutations: remove `entry`'s snapshot `private-key` wiring and the release's; remove
+    `cell`'s `SHIPMATE_APP_PRIVATE_KEY` secret.
     """
     reading = {
         n
-        for n, job in workflow_jobs(LEVEL).items()
+        for n, job in workflow_jobs(STAGE).items()
         if f"secrets.{APP_KEY_ENV}" in secrets_refs(job)
     }
-    assert reading == {
-        "snapshot",
-        "complete",
-        *(f"wave{n}-release" for n in range(8)),
-        *(f"wave{n}" for n in range(8)),
-    }
+    assert reading == {"entry", "cell", "complete"}
 
 
 #: The only steps of `cell.yml` that reference the App key, by job: `apply`'s refusal, which
@@ -166,24 +162,22 @@ def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     assert "shipmate-engine" not in str(job.get("environment", ""))
 
 
-def test_snapshot_release_and_complete_jobs_are_the_only_level_jobs_naming_the_engine_env():
-    """Mutations: drop `snapshot`'s `environment:` binding; drop `complete`'s; drop
-    `wave1-release`'s."""
+def test_entry_and_complete_are_the_only_stage_jobs_naming_the_engine_env():
+    """Mutations: drop `entry`'s `environment:` binding; drop `complete`'s."""
     # Parsed, not a `text.count(...) == 1` textual check: that form is satisfied by any single
-    # job naming the environment, so moving it onto wave0, which runs tofu over branch content,
+    # job naming the environment, so moving it onto `cell`, which runs tofu over branch content,
     # would keep the count at 1 and the test green while releasing the key to consumer code.
     # Assert the specific job, not the count.
     named = {
-        n for n, j in workflow_jobs(LEVEL).items() if "shipmate-engine" in str(j.get("environment"))
+        n for n, j in workflow_jobs(STAGE).items() if "shipmate-engine" in str(j.get("environment"))
     }
-    assert named == {"snapshot", "complete", *(f"wave{n}-release" for n in range(8))}
+    assert named == {"entry", "complete"}
 
 
 #: Every (workflow, job) binding `shipmate-engine`, hand-written. Each holds the App key.
 ENGINE_BOUND_JOBS = {
-    ("apply-env-level.yml", "snapshot"),
-    *(("apply-env-level.yml", f"wave{n}-release") for n in range(8)),
-    ("apply-env-level.yml", "complete"),
+    ("stage.yml", "entry"),
+    ("stage.yml", "complete"),
     ("cell.yml", "save"),
     ("apply-run.yml", "review"),
     ("apply-run.yml", "waiters"),

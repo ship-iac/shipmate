@@ -1,14 +1,15 @@
 """The plan and drift matrices and the merge deploy's `warm` matrix run at most `max_parallel`
-jobs at once; apply waves and unlock do not.
+jobs at once; apply cells and unlock do not.
 
 Only jobs binding `<env>-apply` are exempt: its reviewers and wait timer would fire again for
-every batch, so apply waves and unlock stay uncapped. `warm` binds no environment, so it is
-capped.
+every batch, so a stage's cells and unlock stay uncapped. `warm` binds no environment, so it is
+capped. `waves.yml`'s stage matrix binds nothing and runs one stage at a time, in order, and a
+failed stage stops the later ones (`max-parallel: 1`, `fail-fast: true`).
 
 Threat model: an accidental regression -- a dropped or edited `max-parallel`, a new matrix job
-written without one, a cap added to a wave or to unlock -- not a hostile edit to a SHA-pinned
-engine file. GitHub runs a matrix with `max-parallel: 0` unbounded, and fails the run when the
-expression is empty or a string, so the expression must be `fromJSON` over the detect's
+written without one, a cap added to a stage's cells or to unlock -- not a hostile edit to a
+SHA-pinned engine file. GitHub runs a matrix with `max-parallel: 0` unbounded, and fails the run
+when the expression is empty or a string, so the expression must be `fromJSON` over the detect's
 validated output.
 
 Every expected value is hand-written, never read from the files under test.
@@ -34,12 +35,14 @@ EXPECTED_STRATEGIES = {
         "fail-fast": False,
         "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
     },
-    **{
-        ("apply-env-level.yml", f"wave{n}"): {
-            "fail-fast": False,
-            "matrix": {"include": f"${{{{ fromJSON(inputs.waves_json).wave{n} }}}}"},
-        }
-        for n in range(8)
+    ("waves.yml", "stage"): {
+        "max-parallel": 1,
+        "fail-fast": True,
+        "matrix": {"include": "${{ fromJSON(inputs.stages) }}"},
+    },
+    ("stage.yml", "cell"): {
+        "fail-fast": False,
+        "matrix": {"include": "${{ fromJSON(inputs.level_waves)[inputs.key] }}"},
     },
     ("deploy.yml", "warm"): {
         "fail-fast": False,
@@ -48,44 +51,93 @@ EXPECTED_STRATEGIES = {
     },
 }
 
-#: Each env-level call's whole `with:` in the two callers.
-#: The pre-merge apply passes its pull request, whose cell locks each cell verifies; the merge
-#: deploy passes the merged pull request with `deploy: true`, and each cell refuses only a lock
-#: another pull request holds. Only the apply's first populated level takes `lock`'s snapshot.
-EXPECTED_ENVLEVEL_WITH = {
-    (workflow, f"envlevel{n}"): {
-        "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
-        "head_sha": "${{ needs.detect.outputs.head_sha }}",
-        "runs_on": "${{ inputs.runs_on }}",
-        "tools": "${{ needs.detect.outputs.tools }}",
-        **extra,
-        **(
-            {
-                "by_wave": (
-                    f"${{{{ needs.detect.outputs.first_level == '{n}' && "
-                    "needs.lock.outputs.by_wave || '' }}"
-                )
-            }
-            if workflow == "apply-run.yml"
-            else {}
-        ),
-    }
-    for workflow, extra in (
-        (
-            "apply-run.yml",
-            {
-                "pr_number": "${{ inputs.pr_number }}",
-                "auto": "${{ inputs.auto }}",
-                "provenance_run": "${{ needs.detect.outputs.provenance_run }}",
-                "base_sha": "${{ needs.detect.outputs.base_sha }}",
-            },
-        ),
-        (
-            "deploy.yml",
-            {"pr_number": "${{ needs.detect.outputs.pr_number }}", "deploy": True},
-        ),
-    )
-    for n in range(4)
+_PASS_THROUGH = {
+    "head_sha": "${{ needs.detect.outputs.head_sha }}",
+    "runs_on": "${{ inputs.runs_on }}",
+    "tools": "${{ needs.detect.outputs.tools }}",
+}
+_STAGES = {
+    "stages": "${{ needs.detect.outputs.stages }}",
+    "levels": "${{ needs.detect.outputs.levels }}",
+    "keys": "${{ needs.detect.outputs.keys }}",
+    "counts": "${{ needs.detect.outputs.counts }}",
+}
+
+#: Each caller's whole `waves` `with:`. The pre-merge apply passes its pull request and `lock`'s
+#: snapshot of the first level; the merge deploy passes the merged pull request with
+#: `deploy: true`, so each cell refuses only a lock another pull request holds.
+EXPECTED_WAVES_WITH = {
+    "apply-run.yml": {
+        **_STAGES,
+        **_PASS_THROUGH,
+        "pr_number": "${{ inputs.pr_number }}",
+        "auto": "${{ inputs.auto }}",
+        "provenance_run": "${{ needs.detect.outputs.provenance_run }}",
+        "base_sha": "${{ needs.detect.outputs.base_sha }}",
+        "by_wave": "${{ needs.lock.outputs.by_wave }}",
+    },
+    "deploy.yml": {
+        **_STAGES,
+        **_PASS_THROUGH,
+        "pr_number": "${{ needs.detect.outputs.pr_number }}",
+        "by_wave": "",
+        "deploy": True,
+    },
+}
+
+#: `waves.yml`'s whole `stage` `with:`. Only level 0's stages take the caller's `by_wave`.
+EXPECTED_STAGE_WITH = {
+    "level_waves": "${{ fromJSON(inputs.levels)[matrix.level] }}",
+    "key": "${{ matrix.key }}",
+    "n": "${{ matrix.n }}",
+    "first": "${{ matrix.first }}",
+    "keys": "${{ inputs.keys }}",
+    "counts": "${{ inputs.counts }}",
+    "by_wave": "${{ matrix.level == 0 && inputs.by_wave || '' }}",
+    "head_sha": "${{ inputs.head_sha }}",
+    "runs_on": "${{ inputs.runs_on }}",
+    "tools": "${{ inputs.tools }}",
+    "pr_number": "${{ inputs.pr_number }}",
+    "auto": "${{ inputs.auto }}",
+    "provenance_run": "${{ inputs.provenance_run }}",
+    "base_sha": "${{ inputs.base_sha }}",
+    "deploy": "${{ inputs.deploy }}",
+}
+
+_OPTIONAL = {
+    "pr_number": {"required": False, "type": "string", "default": ""},
+    "auto": {"required": False, "type": "boolean", "default": False},
+    "provenance_run": {"required": False, "type": "string", "default": ""},
+    "base_sha": {"required": False, "type": "string", "default": ""},
+    "deploy": {"required": False, "type": "boolean", "default": False},
+    "by_wave": {"required": False, "type": "string", "default": ""},
+}
+_REQUIRED = {
+    "head_sha": {"required": True, "type": "string"},
+    "runs_on": {"required": True, "type": "string"},
+    "tools": {"required": True, "type": "string"},
+}
+
+#: The whole `workflow_call.inputs` of the two stage workflows.
+EXPECTED_INPUTS = {
+    "waves.yml": {
+        "stages": {"required": True, "type": "string"},
+        "levels": {"required": True, "type": "string"},
+        "keys": {"required": True, "type": "string"},
+        "counts": {"required": True, "type": "string"},
+        **_REQUIRED,
+        **_OPTIONAL,
+    },
+    "stage.yml": {
+        "level_waves": {"required": True, "type": "string"},
+        "key": {"required": True, "type": "string"},
+        "n": {"required": True, "type": "number"},
+        "first": {"required": True, "type": "boolean"},
+        "keys": {"required": True, "type": "string"},
+        "counts": {"required": True, "type": "string"},
+        **_REQUIRED,
+        **_OPTIONAL,
+    },
 }
 
 #: The detect `max_parallel` output each workflow exposes; `None` where none may exist.
@@ -108,10 +160,11 @@ def test_every_matrix_job_carries_exactly_this_strategy():
     must not strand its siblings' locks. Unlock's matrix reads `cells`, the only list its
     detect writes; any other `needs.detect.outputs.*` reads '' and `fromJSON('')` fails.
 
-    Mutations: add `max-parallel` to `unlock` or to `wave3`; remove it from `plan`; write
-    `drift`'s as `${{ needs.detect.outputs.max_parallel }}` with no `fromJSON`; drop it from
+    Mutations: add `max-parallel` to `unlock` or to `stage.yml`'s `cell`; remove it from `plan`;
+    write `drift`'s as `${{ needs.detect.outputs.max_parallel }}` with no `fromJSON`; drop it from
     `deploy.yml`'s `warm`; add a matrix
-    job to `unlock.yml`; add a `foo.yaml` holding a matrix job; `fail-fast: true` on a wave."""
+    job to `unlock.yml`; add a `foo.yaml` holding a matrix job; `max-parallel: 2` or
+    `fail-fast: false` on `waves.yml`'s `stage`."""
     found = {
         (path.name, job_id): job["strategy"]
         for path in _workflow_files()
@@ -121,42 +174,31 @@ def test_every_matrix_job_carries_exactly_this_strategy():
     assert found == EXPECTED_STRATEGIES
 
 
-def test_apply_env_level_takes_no_cap():
-    """Mutations: declare a `max_parallel` input on `apply-env-level.yml`; make `tools`
-    optional; `by_wave` default `"x"`."""
-    inputs = workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]["inputs"]
-    assert inputs == {
-        "waves_json": {"required": True, "type": "string"},
-        "head_sha": {"required": True, "type": "string"},
-        "runs_on": {"required": True, "type": "string"},
-        "pr_number": {"required": False, "type": "string", "default": ""},
-        "auto": {"required": False, "type": "boolean", "default": False},
-        "provenance_run": {"required": False, "type": "string", "default": ""},
-        "base_sha": {"required": False, "type": "string", "default": ""},
-        "deploy": {"required": False, "type": "boolean", "default": False},
-        "tools": {"required": True, "type": "string"},
-        "by_wave": {"required": False, "type": "string", "default": ""},
-    }
+def test_the_stage_workflows_take_no_cap():
+    """Mutations: declare a `max_parallel` input on `stage.yml`; make `waves.yml`'s `tools`
+    optional; `stage.yml`'s `n` of type `string`."""
+    found = {w: workflow_yaml(w)["on"]["workflow_call"]["inputs"] for w in EXPECTED_INPUTS}
+    assert found == EXPECTED_INPUTS
 
 
-def test_apply_env_level_publishes_no_output():
-    """Mutation: declare `on.workflow_call.outputs` with a `by_wave` output."""
-    assert "outputs" not in workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]
+def test_the_stage_workflows_publish_no_output():
+    """Mutation: declare `on.workflow_call.outputs` with a `by_wave` output on `waves.yml`."""
+    found = {w: "outputs" in workflow_yaml(w)["on"]["workflow_call"] for w in EXPECTED_INPUTS}
+    assert found == {"waves.yml": False, "stage.yml": False}
 
 
-def test_no_env_level_call_passes_a_cap():
-    """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
-    or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply-run.yml`'s
-    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call; pass `by_wave: x` in
-    `deploy.yml`'s `envlevel0` call; compare `'0'` in `apply-run.yml`'s `envlevel1` `by_wave`, so
-    a level that is not the first skips its own snapshot."""
+def test_no_stage_call_passes_a_cap():
+    """Mutations: pass `max_parallel` in `deploy.yml`'s `waves` call; drop `deploy: true`
+    from it; pass `deploy` in `apply-run.yml`'s; `by_wave: ''` in `apply-run.yml`'s, so the
+    first stage snapshots again; `matrix.level == 1` in `waves.yml`'s `by_wave`."""
     found = {
-        (workflow, job_id): job["with"]
+        workflow: job["with"]
         for workflow in ("apply-run.yml", "deploy.yml")
-        for job_id, job in workflow_jobs(workflow).items()
-        if job.get("uses") == "./.github/workflows/apply-env-level.yml"
+        for job in workflow_jobs(workflow).values()
+        if job.get("uses") == "./.github/workflows/waves.yml"
     }
-    assert found == EXPECTED_ENVLEVEL_WITH
+    assert found == EXPECTED_WAVES_WITH
+    assert workflow_jobs("waves.yml")["stage"]["with"] == EXPECTED_STAGE_WITH
 
 
 def test_only_the_capped_workflows_expose_the_detect_output():

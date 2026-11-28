@@ -20,7 +20,7 @@ The realistic failure is accidental regression -- a dropped key, a group restore
 job -- not a hostile edit to a SHA-pinned file every consumer reviews.
 
 Mutations: drop `queue: max` from `unlock.yml`; add the group to `cell.yml`'s `apply`;
-restore a job-level group on `apply-env-level.yml`'s `wave0`.
+restore a job-level group on `stage.yml`'s `cell`.
 """
 
 from _loader import WORKFLOWS, workflow_jobs, workflow_yaml

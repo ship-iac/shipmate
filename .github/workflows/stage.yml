@@ -1,0 +1,158 @@
+name: stage
+on:
+  workflow_call:
+    inputs:
+      # This stage's level, as detect wrote it: a JSON string of its stages' cell rows by key.
+      level_waves: { required: true, type: string }
+      key: { required: true, type: string }
+      # The stage's run position; `first` marks its level's first stage.
+      n: { required: true, type: number }
+      first: { required: true, type: boolean }
+      keys: { required: true, type: string }
+      counts: { required: true, type: string }
+      # The level's check ids, which the caller already snapshotted, with the level's first
+      # stage already released. When it is set, `entry` neither verifies nor snapshots.
+      by_wave: { required: false, type: string, default: "" }
+      head_sha: { required: true, type: string }
+      runs_on: { required: true, type: string }
+      tools: { required: true, type: string }
+      pr_number: { required: false, type: string, default: "" }
+      auto: { required: false, type: boolean, default: false }
+      provenance_run: { required: false, type: string, default: "" }
+      base_sha: { required: false, type: string, default: "" }
+      deploy: { required: false, type: boolean, default: false }
+    secrets:
+      SHIPMATE_ENCRYPTION_KEY:
+        required: false
+      SHIPMATE_APP_PRIVATE_KEY:
+        required: false
+      SHIPMATE_SECRETS:
+        required: false
+# Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
+# id-token: write.
+permissions: {}
+jobs:
+  # Guards that every earlier stage applied and saved, pre-flights and snapshots unless the caller
+  # supplied `by_wave`, then releases this stage. Skipped only for the stage the caller released.
+  entry:
+    if: ${{ inputs.n > 0 || inputs.by_wave == '' }}
+    runs-on: ubuntu-slim
+    # Permissions cap at each `uses:` boundary, so every calling job must grant these too. On a
+    # private repository, listing environments 403s without actions:read (measured; undocumented).
+    permissions: { actions: read, checks: read }
+    environment: { name: shipmate-engine, deployment: false }
+    # `refused` until the release starts, so `complete` writes nothing for a stage never
+    # released; a lost runner reads empty, and `complete` then writes it.
+    outputs:
+      phase: ${{ steps.releasing.outputs.phase || steps.mark.outputs.phase }}
+      by_wave: ${{ steps.snap.outputs.by_wave }}
+    steps:
+      - id: mark
+        shell: bash
+        run: echo "phase=refused" >> "$GITHUB_OUTPUT"
+      - name: Guard the earlier stages
+        if: ${{ inputs.n > 0 }}
+        uses: $/actions/apply-release
+        with:
+          mode: guard
+          keys: ${{ inputs.keys }}
+          counts: ${{ inputs.counts }}
+          n: ${{ inputs.n }}
+          job-id: ${{ job.check_run_id }}
+      # Before any cell binds the environments it checks: binding one nobody created auto-creates
+      # it with no protection. A level's first stage checks the whole level, later ones their own.
+      - if: ${{ inputs.by_wave == '' }}
+        uses: $/actions/verify-environments
+        with:
+          waves-json: ${{ inputs.level_waves }}
+          key: ${{ !inputs.first && inputs.key || '' }}
+      - id: snap
+        if: ${{ inputs.by_wave == '' }}
+        uses: $/actions/apply-snapshot
+        with:
+          head-sha: ${{ inputs.head_sha }}
+          waves-json: ${{ inputs.level_waves }}
+          key: ${{ !inputs.first && inputs.key || '' }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # Immediately before the release: an output written before a failed step still reaches
+      # `complete`, so a partial flip is written back.
+      - id: releasing
+        shell: bash
+        run: echo "phase=releasing" >> "$GITHUB_OUTPUT"
+      - uses: $/actions/apply-release
+        with:
+          mode: release
+          by-wave: ${{ inputs.by_wave || steps.snap.outputs.by_wave }}
+          key: ${{ inputs.key }}
+          deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  cell:
+    needs: [entry]
+    if: ${{ !cancelled() && (needs.entry.result == 'success' || needs.entry.result == 'skipped' && inputs.by_wave != '') }}
+    # A job that calls a workflow takes no `runs-on`, `environment` or `cache-mode`: `cell.yml`
+    # sets each per job. No `concurrency` either: a group repeated here and in `cell.yml` fails
+    # the call at once, and `cell.yml` holds it from `apply` through `save`.
+    uses: ./.github/workflows/cell.yml
+    permissions: { contents: read, actions: read, checks: read, pull-requests: read, id-token: write }
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.level_waves)[inputs.key] }}
+    name: ${{ matrix.environment }} / ${{ matrix.stack }}
+    with:
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+      by_wave: ${{ inputs.by_wave || needs.entry.outputs.by_wave }}
+    # Named, never `inherit`: see the `waves` job in apply-run.yml. Do not map the App key to
+    # an empty literal: with "" here, `save` did not receive shipmate-engine's key (sample run
+    # 45911273841).
+    secrets:
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  # Rewrites the stage's checks when its release or cells failed or were cancelled, or the run
+  # was cancelled; a green stage skips it, since each `save` completed its own cell. It needs
+  # `entry` and `cell`, so no flip lands after it.
+  complete:
+    needs: [entry, cell]
+    if: ${{ always() && needs.entry.outputs.phase != 'refused' && (cancelled() || needs.entry.result == 'failure' || needs.entry.result == 'cancelled' || needs.cell.result == 'failure' || needs.cell.result == 'cancelled') }}
+    runs-on: ubuntu-slim
+    permissions: { actions: read, checks: read }
+    environment: { name: shipmate-engine, deployment: false }
+    steps:
+      # A lost `entry` runner discards its outputs. The counted listing fails short rather than
+      # leave an unlisted check `in_progress`.
+      - id: resnap
+        if: ${{ inputs.by_wave == '' && needs.entry.outputs.by_wave == '' }}
+        uses: $/actions/apply-snapshot
+        with:
+          head-sha: ${{ inputs.head_sha }}
+          waves-json: ${{ inputs.level_waves }}
+          key: ${{ inputs.key }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          counted: "true"
+      - uses: $/actions/apply-complete
+        with:
+          by-wave: ${{ inputs.by_wave || needs.entry.outputs.by_wave || steps.resnap.outputs.by_wave }}
+          wave-results: '{"${{ inputs.key }}": "${{ needs.cell.result }}"}'
+          phase: ${{ needs.entry.outputs.phase }}
+          job-id: ${{ job.check_run_id }}
+          deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

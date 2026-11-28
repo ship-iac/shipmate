@@ -10,12 +10,13 @@ from _loader import workflow_yaml
 #: Every engine workflow whose empty workflow-level floor is pinned. Hand-written, never globbed:
 #: a glob would pin whatever the directory holds.
 _FLOORED = [
-    "apply-env-level.yml",
     "cell.yml",
     "comment-ops.yml",
     "drift.yml",
     "plan.yml",
+    "stage.yml",
     "unlock.yml",
+    "waves.yml",
 ]
 
 

@@ -204,29 +204,9 @@ DETECT_NEEDS = {
 DOWNSTREAM_NEEDS = {
     "apply-run.yml": {
         "lock": ["review", "detect"],
-        "envlevel0": ["review", "detect", "lock"],
-        "envlevel1": ["review", "detect", "lock", "envlevel0"],
-        "envlevel2": ["review", "detect", "lock", "envlevel0", "envlevel1"],
-        "envlevel3": ["review", "detect", "lock", "envlevel0", "envlevel1", "envlevel2"],
-        "unflip": [
-            "review",
-            "detect",
-            "lock",
-            "envlevel0",
-            "envlevel1",
-            "envlevel2",
-            "envlevel3",
-        ],
-        "summary": [
-            "review",
-            "detect",
-            "lock",
-            "envlevel0",
-            "envlevel1",
-            "envlevel2",
-            "envlevel3",
-            "unflip",
-        ],
+        "waves": ["review", "detect", "lock"],
+        "unflip": ["review", "detect", "lock", "waves"],
+        "summary": ["review", "detect", "lock", "waves", "unflip"],
     },
     # No `summary` job: an unlock refreshes no gate and `result` replies with the job token, so
     # nothing here mints the App key. `result` needs `guard` so a rejected dispatch skips it.
@@ -383,10 +363,9 @@ def test_the_canonical_pr_number_step_is_this_whole_step():
 
 
 def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
-    """`DOWNSTREAM_NEEDS`, whole list per job, also pins the env-level order: each level needs
-    every level before it, so a bare apply runs them in `needs` order.
+    """`DOWNSTREAM_NEEDS`, whole list per job.
 
-    Mutations: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red; drop
+    Mutations: drop `lock` from `apply-run.yml`'s `waves` `needs:` -- red; drop
     `review` from `lock`'s -- red; drop `unflip` from `summary`'s, so its gate refresh can read
     before `unflip` wrote -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():

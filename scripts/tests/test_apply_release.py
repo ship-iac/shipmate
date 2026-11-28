@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import _shipmate
 import pytest
-from _loader import action_steps, action_yaml, load_script
+from _loader import ENGINE_ENVIRONMENT, action_steps, action_yaml, load_script, workflow_jobs
 
 ar = load_script("apply-release")
 
@@ -224,3 +224,76 @@ def test_the_action_takes_the_stage_inputs_and_no_snapshot():
         "pr-number",
         "private-key",
     ]
+
+
+_APP_KEY = {
+    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+}
+#: A level's first stage pre-flights and snapshots the whole level, a later stage its own key.
+_ONE_STAGE = "${{ !inputs.first && inputs.key || '' }}"
+
+#: `stage.yml`'s whole `entry` job, hand-written. `releasing` overrides `mark`'s `refused` just
+#: before the release, which selects `key` from the raw `by_wave` by exact name: an expression
+#: lookup folds case.
+STAGE_ENTRY = {
+    "if": "${{ inputs.n > 0 || inputs.by_wave == '' }}",
+    "runs-on": "ubuntu-slim",
+    "permissions": {"actions": "read", "checks": "read"},
+    "environment": ENGINE_ENVIRONMENT,
+    "outputs": {
+        "phase": "${{ steps.releasing.outputs.phase || steps.mark.outputs.phase }}",
+        "by_wave": "${{ steps.snap.outputs.by_wave }}",
+    },
+    "steps": [
+        {"id": "mark", "shell": "bash", "run": 'echo "phase=refused" >> "$GITHUB_OUTPUT"'},
+        {
+            "name": "Guard the earlier stages",
+            "if": "${{ inputs.n > 0 }}",
+            "uses": "$/actions/apply-release",
+            "with": {
+                "mode": "guard",
+                "keys": "${{ inputs.keys }}",
+                "counts": "${{ inputs.counts }}",
+                "n": "${{ inputs.n }}",
+                "job-id": "${{ job.check_run_id }}",
+            },
+        },
+        {
+            "if": "${{ inputs.by_wave == '' }}",
+            "uses": "$/actions/verify-environments",
+            "with": {"waves-json": "${{ inputs.level_waves }}", "key": _ONE_STAGE},
+        },
+        {
+            "id": "snap",
+            "if": "${{ inputs.by_wave == '' }}",
+            "uses": "$/actions/apply-snapshot",
+            "with": {
+                "head-sha": "${{ inputs.head_sha }}",
+                "waves-json": "${{ inputs.level_waves }}",
+                "key": _ONE_STAGE,
+                **_APP_KEY,
+            },
+        },
+        {"id": "releasing", "shell": "bash", "run": 'echo "phase=releasing" >> "$GITHUB_OUTPUT"'},
+        {
+            "uses": "$/actions/apply-release",
+            "with": {
+                "mode": "release",
+                "by-wave": "${{ inputs.by_wave || steps.snap.outputs.by_wave }}",
+                "key": "${{ inputs.key }}",
+                "deploy": "${{ inputs.deploy }}",
+                "pr-number": "${{ inputs.pr_number }}",
+                **_APP_KEY,
+            },
+        },
+    ],
+}
+
+
+def test_a_stages_entry_guards_preflights_and_releases_by_exact_name():
+    """Mutations: move `releasing` after the release step; swap the `||` operands of the
+    `phase` output; release `by-wave: ${{ toJSON(fromJSON(inputs.by_wave ||
+    steps.snap.outputs.by_wave)[inputs.key]) }}`; drop `key` from the snapshot; `inputs.n > 1`
+    on the guard; `inputs.n > 0 && inputs.by_wave == ''` in the job's `if:`."""
+    assert workflow_jobs("stage.yml")["entry"] == STAGE_ENTRY

@@ -57,9 +57,7 @@ APPLY_RUN_OUTPUTS = {
     "run_cancelled": {
         "value": (
             "${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || "
-            "jobs.lock.result == 'cancelled' || jobs.envlevel0.result == 'cancelled' || "
-            "jobs.envlevel1.result == 'cancelled' || jobs.envlevel2.result == 'cancelled' || "
-            "jobs.envlevel3.result == 'cancelled' }}"
+            "jobs.lock.result == 'cancelled' || jobs.waves.result == 'cancelled' }}"
         )
     },
 }

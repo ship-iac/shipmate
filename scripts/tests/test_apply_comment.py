@@ -9,7 +9,6 @@ from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
 ac = load_script("apply-comment")
-wv = load_script("waves")
 
 RUN_URL = "https://gh/run/1"
 
@@ -1803,42 +1802,49 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
-def test_every_env_level_job_is_named_for_its_level():
-    """`apply-gate.cell_part` requires the `L<n>` segment, so every env-level job of
-    `apply-run.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
-    up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
-    `level 0`."""
-    expected = {f"envlevel{n}": f"L{n}" for n in range(wv.MAX_ENV_LEVELS)}
-    for wf in ("apply-run.yml", "deploy.yml"):
-        jobs = workflow_yaml(wf)["jobs"]
-        names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}
-        assert names == expected, f"{wf}: {names}"
+def test_every_stage_job_is_named_for_the_cell_job_grammar():
+    """`apply-gate.cell_part` reads `<caller> / waves / L<i>-W<w> / <env> / <stack> / <part>`: the
+    callers' job id `waves` with no `name:` of its own, `waves.yml`'s `stage` named by its stage
+    key, `stage.yml`'s `cell` named `<env> / <stack>` and its other jobs unnamed, compared whole.
+    Mutations: add `name: stages` to deploy.yml's `waves`; name `waves.yml`'s `stage`
+    `${{ matrix.n }}`; give `stage.yml`'s `entry` a `name:`."""
+    callers = {
+        wf: {j: v.get("name") for j, v in workflow_yaml(wf)["jobs"].items() if j == "waves"}
+        for wf in ("apply-run.yml", "deploy.yml")
+    }
+    assert callers == {"apply-run.yml": {"waves": None}, "deploy.yml": {"waves": None}}
+    stage = {j: v.get("name") for j, v in workflow_yaml("waves.yml")["jobs"].items()}
+    assert stage == {"stage": "${{ matrix.key }}"}
+    jobs = {j: v.get("name") for j, v in workflow_yaml("stage.yml")["jobs"].items()}
+    assert jobs == {
+        "entry": None,
+        "cell": "${{ matrix.environment }} / ${{ matrix.stack }}",
+        "complete": None,
+    }
 
 
 def test_wave_job_name_matches_the_cell_job_grammar():
     """Coupling: `_job_url` finds a cell's job by `apply-gate.cell_part`'s
-    `L<n> / <env> / <stack> / <part>`, whole or after a ` / ` boundary, which works only because
-    every wave job's `name:` renders `<env> / <stack>`, hands `cell.yml` the same matrix keys,
-    the env-level job holding it is named `L<n>`, and `cell.yml`'s job ids are `apply` and
-    `save` with no `name:` of their own. A rename downgrades every log link to the run URL.
+    `L<i>-W<w> / <env> / <stack> / <part>`, whole or after a ` / ` boundary, which works only
+    because `stage.yml`'s `cell` `name:` renders `<env> / <stack>`, hands `cell.yml` the same
+    matrix keys, and `cell.yml`'s job ids are `apply` and `save` with no `name:` of their own.
+    A rename downgrades every log link to the run URL.
 
-    Mutations: swap the two matrix keys on wave0's `name: &wave-name`; feed the wave's `stack:`
-    from another matrix key; rename `cell.yml`'s `apply` job to `run`; give it a `name:`;
-    rename deploy.yml's `name: L0` to `level 0`; link the `save` job from `_job_url` by
-    default -- red."""
-    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    waves = [f"wave{i}" for i in range(wv.MAX_WAVES)]
-    names = [jobs[w].get("name") for w in waves]
-    assert names == ["${{ matrix.environment }} / ${{ matrix.stack }}"] * wv.MAX_WAVES
-    wired = [(jobs[w]["with"]["stack"], jobs[w]["with"]["environment"]) for w in waves]
-    assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * wv.MAX_WAVES
+    Mutations: swap the two matrix keys on `cell`'s `name:`; feed its `stack:` from another
+    matrix key; rename `cell.yml`'s `apply` job to `run`; give it a `name:`; link the `save`
+    job from `_job_url` by default -- red."""
+    job = workflow_yaml("stage.yml")["jobs"]["cell"]
+    assert job["name"] == "${{ matrix.environment }} / ${{ matrix.stack }}"
+    assert (job["with"]["stack"], job["with"]["environment"]) == (
+        "${{ matrix.stack }}",
+        "${{ matrix.environment }}",
+    )
     cell = workflow_yaml("cell.yml")["jobs"]
     assert [j.get("name") for j in cell.values()] == [None] * len(cell)
-    # Built from the sources: deploy.yml's level name and cell.yml's job ids.
-    level = workflow_yaml("deploy.yml")["jobs"]["envlevel0"]["name"]
+    # Built from the sources: cell.yml's job ids.
     row = _row(environment="dev-eu", stack="stacks/app")
     listed = [
-        _job(f"deploy / {level} / dev-eu / stacks/app / {p}", f"https://gh/{p}") for p in cell
+        _job(f"deploy / waves / L0-W2 / dev-eu / stacks/app / {p}", f"https://gh/{p}") for p in cell
     ]
     assert {p: ac._job_url(row, listed, RUN_URL, p) for p in cell} == {
         "apply": "https://gh/apply",
@@ -2526,15 +2532,18 @@ def test_a_long_detect_refusal_is_cut_at_the_reason_cap():
     )
 
 
-def test_main_renders_a_failed_detects_refusal_without_cells(monkeypatch, tmp_path):
-    """A failed detect writes no `cells`, so the render step reads none and still replies.
+@pytest.mark.parametrize("unset", [True, False], ids=["absent", "empty"])
+def test_main_renders_a_failed_detects_refusal_without_cells(monkeypatch, tmp_path, unset):
+    """A failed detect writes no `cells`, so the render step reads none and still replies:
+    `apply-run.yml` feeds the never-written output as `""`.
 
-    Mutation: `cell_names` the empty string in `_expected_cells` (no empty short-circuit) --
-    the render refuses, red."""
+    Mutations: `cell_names` the empty string in `_expected_cells` (no empty short-circuit) --
+    the render refuses, red; short-circuit only an absent `SHIPMATE_CELLS` -- red for `empty`."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    monkeypatch.delenv("SHIPMATE_CELLS")
+    if unset:
+        monkeypatch.delenv("SHIPMATE_CELLS")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success,failure,skipped")
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
     monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", _REFUSAL)

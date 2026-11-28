@@ -71,7 +71,8 @@ ENGINE_CALL_SECRETS = {
     "apply.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "apply-run.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "deploy.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
-    "apply-env-level.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "waves.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "stage.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     # `save` completes the cell's check with the App key; `apply` refuses when it arrives there.
     "cell.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the

@@ -163,8 +163,7 @@ def _is_reusable_caller(job):
 
 
 def _reusable_target_name(uses):
-    # "ship-iac/shipmate/.github/workflows/apply-env-level.yml@<sha>" becomes
-    # "apply-env-level.yml".
+    # "ship-iac/shipmate/.github/workflows/stage.yml@<sha>" becomes "stage.yml".
     path_part = uses.split("@", 1)[0]
     return path_part.rsplit("/", 1)[-1]
 
@@ -265,14 +264,15 @@ def test_credentialed_action_steps_thread_app_credentials():
     `.github/workflows/*.yml`) threads the credential through the `secrets:` block rather than a
     `with:` input, so the assertion there is that the caller passes the whole block
     `_loader.ENGINE_CALL_SECRETS` names for that callee, and that a callee whose block holds
-    `SHIPMATE_APP_PRIVATE_KEY` declares it under `on.workflow_call.secrets`. Mutation: drop
-    `SHIPMATE_APP_PRIVATE_KEY` from `apply-env-level.yml`'s declared secrets.
+    `SHIPMATE_APP_PRIVATE_KEY` declares it under `on.workflow_call.secrets`. Mutations: drop
+    `SHIPMATE_APP_PRIVATE_KEY` from `stage.yml`'s declared secrets; drop `SHIPMATE_SECRETS` from
+    `waves.yml`'s `stage` `secrets:`; `secrets: inherit` on `apply-run.yml`'s `waves`.
 
     Never `secrets: inherit`, including on these engine-internal hops. The files sit in one
     organization but the run belongs to the consumer, and inherit is evaluated against the run:
     a cross-organization consumer's applies would execute and then strand their
-    `apply / <env> / <stack>` checks pending forever, because `apply-env-level.yml`'s `complete`
-    job would hold no key to complete them with.
+    `apply / <env> / <stack>` checks pending forever, because `stage.yml`'s `complete` job would
+    hold no key to complete them with.
     """
     offenders = []
     workflow_docs = {wf.name: workflow_yaml(wf) for wf in sorted(WORKFLOWS.glob("*.yml"))}

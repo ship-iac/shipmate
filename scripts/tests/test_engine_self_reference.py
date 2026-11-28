@@ -75,7 +75,7 @@ def test_no_step_outside_the_manifest_probe_reaches_the_engine_remotely():
 
 def test_no_step_checks_out_another_repository():
     """`$/` fetches the engine itself, so no job checks it out. Mutation: restore the engine
-    checkout (`repository: ship-iac/shipmate`) to the `complete` job of apply-env-level.yml."""
+    checkout (`repository: ship-iac/shipmate`) to the `complete` job of stage.yml."""
     offenders = [
         f"{where}: {step['with']}"
         for where, step in _steps(skip=None)
@@ -99,7 +99,8 @@ def test_no_step_resolves_in_the_consumer_workspace():
 def test_every_job_running_an_engine_action_is_counted():
     """Hand-written, never derived: the tests around this one assert inside loops, so a glob that
     matches nothing passes them while checking nothing. Mutations: the `_docs` glob as `*.yaml`;
-    every `$/` step deleted from unlock.yml's `detect` job."""
+    every `$/` step deleted from unlock.yml's `detect` job; every `$/` step deleted from
+    stage.yml's `complete` job."""
     covered = [
         f"{name}:{job_name}"
         for name, doc in _docs()
@@ -107,7 +108,7 @@ def test_every_job_running_an_engine_action_is_counted():
         for job_name, job in (doc.get("jobs") or {}).items()
         if any(_uses(s).startswith(LOCAL_PREFIX) for s in job.get("steps") or [])
     ]
-    assert len(covered) == 42, f"{len(covered)} jobs run an engine action: {covered}"
+    assert len(covered) == 34, f"{len(covered)} jobs run an engine action: {covered}"
 
 
 #: The steps that run an engine action calling `scripts/doctor`, and so must hand it the
@@ -147,7 +148,7 @@ def test_the_doctor_steps_pass_the_engine_repository():
 
 
 def test_nested_reusable_calls_are_local():
-    """Mutation: `uses: ship-iac/shipmate/.github/workflows/apply-env-level.yml@main`."""
+    """Mutation: `uses: ship-iac/shipmate/.github/workflows/stage.yml@main` in waves.yml."""
     for name, doc in _docs():
         for job_name, job in (doc.get("jobs") or {}).items():
             if "uses" in job:

@@ -8,6 +8,7 @@ import sys
 import pytest
 from _loader import (
     ENGINE,
+    ENGINE_ENVIRONMENT,
     SCRIPTS,
     action_steps,
     bash_only,
@@ -17,6 +18,7 @@ from _loader import (
     read_calls,
     run_step,
     run_with_gh_recorder,
+    workflow_jobs,
     write_python3_shim,
     write_stub,
 )
@@ -1623,3 +1625,61 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
         [row("apply / dev-eu / stacks/api", [5], listed), row(WEB, [4])],
         ["dev-eu / stacks/app"],
     )
+
+
+_APP = {
+    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+}
+
+#: `stage.yml`'s whole `complete` job, hand-written. It writes nothing after a refusal before the
+#: release (`phase` `refused`), and otherwise runs on any failure or cancel of `entry` or the cells.
+#: A lost `entry` runner leaves no `by_wave`: it then re-snapshots this stage alone, counted.
+STAGE_COMPLETE = {
+    "needs": ["entry", "cell"],
+    "if": (
+        "${{ always() && needs.entry.outputs.phase != 'refused' && (cancelled() || "
+        "needs.entry.result == 'failure' || needs.entry.result == 'cancelled' || "
+        "needs.cell.result == 'failure' || needs.cell.result == 'cancelled') }}"
+    ),
+    "runs-on": "ubuntu-slim",
+    "permissions": {"actions": "read", "checks": "read"},
+    "environment": ENGINE_ENVIRONMENT,
+    "steps": [
+        {
+            "id": "resnap",
+            "if": "${{ inputs.by_wave == '' && needs.entry.outputs.by_wave == '' }}",
+            "uses": "$/actions/apply-snapshot",
+            "with": {
+                "head-sha": "${{ inputs.head_sha }}",
+                "waves-json": "${{ inputs.level_waves }}",
+                "key": "${{ inputs.key }}",
+                **_APP,
+                "counted": "true",
+            },
+        },
+        {
+            "uses": "$/actions/apply-complete",
+            "with": {
+                "by-wave": (
+                    "${{ inputs.by_wave || needs.entry.outputs.by_wave || "
+                    "steps.resnap.outputs.by_wave }}"
+                ),
+                "wave-results": '{"${{ inputs.key }}": "${{ needs.cell.result }}"}',
+                "phase": "${{ needs.entry.outputs.phase }}",
+                "job-id": "${{ job.check_run_id }}",
+                "deploy": "${{ inputs.deploy }}",
+                "pr-number": "${{ inputs.pr_number }}",
+                **_APP,
+            },
+        },
+    ],
+}
+
+
+def test_a_stages_complete_job_writes_its_own_stage_from_its_cells_result():
+    """Mutations: drop `needs.entry.outputs.phase != 'refused' &&` from `if:`; drop
+    `needs.cell.result == 'cancelled' ||` from it; drop `key` from `resnap`; replace it with
+    `waves-json: ${{ toJSON(fromJSON(inputs.level_waves)[inputs.key]) }}`; `wave-results`
+    keyed `L0-W0`; drop `phase`; `continue-on-error: true` on the job."""
+    assert workflow_jobs("stage.yml")["complete"] == STAGE_COMPLETE
