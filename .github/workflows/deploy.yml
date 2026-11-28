@@ -78,7 +78,7 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
 
-  # No `name:`: `apply-gate.cell_part` reads the job id `waves` in every cell job name.
+  # No `name:`, matching `apply-run.yml`'s `waves`, so cell job names keep one shape.
   waves:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}

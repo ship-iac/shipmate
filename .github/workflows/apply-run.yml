@@ -307,9 +307,9 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   waves:
-    # `review` is listed so its failure reaches `!failure()`: `detect` runs beside it and can
-    # succeed after `review` failed. No `name:`: `apply-gate.cell_part` reads the job id
-    # `waves` in every cell job name, and `unflip` builds the first stage's name from it.
+    # `review` is listed so its failure reaches `!failure()`: `detect` can succeed beside it.
+    # No `name:`: `apply-queue._cell_part` and `unflip` read the job id `waves` in job names
+    # (`test_every_stage_job_is_named_for_the_cell_job_grammar`).
     needs: [review, detect, lock]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
     uses: ./.github/workflows/waves.yml
