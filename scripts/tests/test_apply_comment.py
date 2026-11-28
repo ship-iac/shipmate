@@ -1848,14 +1848,12 @@ def _set_report(monkeypatch, tmp_path, report):
     monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
 
 
-def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
-    """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it: `waves_json`
-    in env-level 0, the other levels and every env set empty."""
+def _main_env(monkeypatch, tmp_path, cells_dir, cells_json, checks_path):
+    """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it:
+    `cells_json` as the detect's `cells`."""
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
-    monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
-    for i in range(1, wv.MAX_ENV_LEVELS):
-        monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    monkeypatch.setenv("SHIPMATE_CELLS", cells_json)
     _set_report(monkeypatch, tmp_path, {})
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
@@ -2044,8 +2042,8 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
         ),
         encoding="utf-8",
     )
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟠 1 not recorded {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 not recorded\n\n"
@@ -2065,8 +2063,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
     cells.mkdir()
     checks = tmp_path / "checks.jsonl"
     checks.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 applied\n\n"
@@ -2081,8 +2079,8 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     Mutation: treat an absent check name as pending in `apply_check_state` -- red."""
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 applied\n\n"
@@ -2090,21 +2088,20 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     )
 
 
-def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
-    """A targeted apply's expected cells arrive in env-level 0, the slot `apply-run.yml` fills from
-    `apply-detect`. `stacks/db` has no artifact, so only the expected-cell set can name it.
+def test_main_renders_the_expected_cells_from_the_cells_input(monkeypatch, tmp_path):
+    """The expected cells arrive in `SHIPMATE_CELLS`, the detect's `cells` output. `stacks/db`
+    has no artifact, so only the expected-cell set can name it.
 
-    Mutation: read the expected cells from `range(1, MAX_ENV_LEVELS)` in `_expected_cells` --
-    the db row and its note are gone, red."""
+    Mutation: return `set()` from `_expected_cells` -- the db row and its note are gone, red."""
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
-    waves = json.dumps(
-        {
-            "wave0": [{"stack": "stacks/app", "environment": "dev-eu"}],
-            "wave1": [{"stack": "stacks/db", "environment": "dev-eu"}],
-        }
+    expected = json.dumps(
+        [
+            {"stack": "stacks/app", "environment": "dev-eu"},
+            {"stack": "stacks/db", "environment": "dev-eu"},
+        ]
     )
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟡 1 not attempted, 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 2 cells, 1 not attempted, 1 applied\n\n"
@@ -2122,15 +2119,13 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
     name, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    waves = json.dumps(
-        {
-            "wave0": [
-                {"stack": "stacks/app", "environment": "live"},
-                {"stack": "stacks/app", "environment": "staging"},
-            ]
-        }
+    expected = json.dumps(
+        [
+            {"stack": "stacks/app", "environment": "live"},
+            {"stack": "stacks/app", "environment": "staging"},
+        ]
     )
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     _set_report(monkeypatch, tmp_path, {"env_order": ["staging", "live"]})
     body = _main_body(tmp_path)
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
@@ -2517,6 +2512,41 @@ def test_a_long_detect_refusal_is_cut_at_the_reason_cap():
     )
 
 
+def test_main_renders_a_failed_detects_refusal_without_cells(monkeypatch, tmp_path):
+    """A failed detect writes no `cells`, so the render step reads none and still replies.
+
+    Mutation: `cell_names` the empty string in `_expected_cells` (no empty short-circuit) --
+    the render refuses, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.delenv("SHIPMATE_CELLS")
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,failure,skipped")
+    monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", _REFUSAL)
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {_MAIN_AT}\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+@pytest.mark.parametrize("raw", ["nope", '{"wave0": []}', '[{"stack": 1}]'])
+def test_main_refuses_malformed_cells(monkeypatch, tmp_path, raw):
+    """Mutation: return `set()` for a `None` from `cell_names` in `_expected_cells` -- the
+    render goes on, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, raw, str(tmp_path / "absent.jsonl"))
+    with pytest.raises(SystemExit) as exc:
+        ac.main()
+    assert exc.value.code == (
+        "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+    )
+
+
 def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, tmp_path):
     """Mutation: drop the `SHIPMATE_DETECT_REFUSAL` argument from `main`'s `build_comment` call
     -- no fence, red."""
@@ -2689,7 +2719,7 @@ _LOCK_REFUSAL = (
 def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_applying(
     monkeypatch, tmp_path, flag, word
 ):
-    """A refused lock job follows a detect that succeeded: its waves name the cells, which read
+    """A refused lock job follows a detect that succeeded: its `cells` name the cells, which read
     not attempted, and the refusal sits in the detect refusal's fence under the verdict, which
     reads refused when `SHIPMATE_REFUSED_BY_RULE` is `true`.
 
@@ -2697,8 +2727,8 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
     Mutation: drop the `SHIPMATE_REFUSED_BY_RULE` read from `main` -- the flagged case, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_RESULTS", "success,success,success,failure,skipped")
     monkeypatch.setenv("SHIPMATE_LOCK_REFUSAL", _LOCK_REFUSAL)
     if flag:
@@ -3113,7 +3143,7 @@ def test_a_behind_refusal_renders_its_line_from_the_report_above_the_fence(
     Mutation: read a report key with `report[k]` -- the missing fields raise, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    _main_env(monkeypatch, tmp_path, cells, json.dumps({"wave0": []}), str(tmp_path / "none"))
+    _main_env(monkeypatch, tmp_path, cells, "[]", str(tmp_path / "none"))
     _set_report(monkeypatch, tmp_path, {"behind": _BEHIND_CELLS, "base": "release/2"})
     monkeypatch.setenv("SHIPMATE_RESULTS", "failure")
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")

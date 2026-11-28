@@ -25,6 +25,7 @@ from _detect_fixtures import (
     cell_job,
     dispatched_plan,
     fake_clock,
+    first_stage,
     forbid_shared_runner,
     foreign_message,
     held,
@@ -38,6 +39,7 @@ from _detect_fixtures import (
     run_graph_capture,
     stub_base_changed,
     stub_read_locks,
+    wave_cells,
 )
 from _detect_fixtures import check_run as _check
 from _loader import detect_report, github_outputs, load_script
@@ -372,9 +374,7 @@ def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b", cells=1)])
     ad.main()
-    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
-        "a-b"
-    ]
+    assert [c["stack"] for c in first_stage(github_outputs(out))] == ["a-b"]
 
 
 def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
@@ -384,9 +384,7 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     out = _apply_env(monkeypatch, tmp_path)
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)])
     ad.main()
-    assert (
-        len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
-    )  # Not vacuous: a cell exists.
+    assert len(first_stage(github_outputs(out))) == 1  # Not vacuous: a cell exists.
     assert urls == [
         *_LISTINGS,
         f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
@@ -407,7 +405,7 @@ def test_a_targeted_apply_reads_the_tag_metadata_once(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ad.bm, "all_tags", all_tags)
     ad.main()
-    assert len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
+    assert len(first_stage(github_outputs(out))) == 1
     assert reads == [1]
 
 
@@ -425,9 +423,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
-        "stacks/app"
-    ]
+    assert [c["stack"] for c in first_stage(github_outputs(out))] == ["stacks/app"]
 
 
 def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_path):
@@ -443,9 +439,7 @@ def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
-        "stacks/app"
-    ]
+    assert [c["stack"] for c in first_stage(github_outputs(out))] == ["stacks/app"]
 
 
 def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
@@ -465,9 +459,7 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
-        "stacks/app"
-    ]
+    assert [c["stack"] for c in first_stage(github_outputs(out))] == ["stacks/app"]
 
 
 def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
@@ -488,10 +480,10 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
     """The double stubs `run_graph_deps`, so the cycle reaches the `dag_shape_notice` and
-    `env_level_waves` sorts; in production the real `run_graph_deps` refuses it first.
+    `stage_outputs` sorts; in production the real `run_graph_deps` refuses it first.
 
     Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
-    `waves.env_level_waves` -- a raw `CycleError` escapes instead of this `SystemExit`."""
+    `waves.stage_outputs` -- a raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
@@ -533,28 +525,27 @@ def test_main_reads_the_run_graph_through_build_matrix(monkeypatch, tmp_path):
     assert urls == []
 
 
-def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, capsys):
-    """`main` reaches `env_level_waves`' padding, so a chain too deep for the pre-declared
-    wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
-    dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
+def test_main_refuses_more_stages_than_a_matrix_holds(monkeypatch, tmp_path, capsys):
+    """`main` reaches `stage_outputs`' stage-count refusal before any output. The DAG-shape notice
+    still prints first: it is the line that explains the depth.
 
-    Mutation: `per_level = [{f"wave{i}": c for i, c in enumerate(wv.assign_waves(
-    wv.levels(deps), runnable))}]` in `main`, unpadded -- the run writes nine waves and exits 0.
-    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
+    Mutation: print the DAG-shape notice after `stage_outputs` -- the notice is missing.
     """
-    depth = ad.wv.MAX_WAVES + 1
-    stacks = [f"stacks/s{i}" for i in range(depth)]
+    stacks = [f"stacks/s{i}" for i in range(257)]
     deps = {s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)}
     out = _apply_env(monkeypatch, tmp_path)
     out.touch()  # The runner creates GITHUB_OUTPUT before the step runs.
-    _stub_apply(monkeypatch, deps, [_apply_check(s, cells=9) for s in stacks])
+    _stub_apply(monkeypatch, deps, [_apply_check(s, cells=257) for s in stacks])
 
-    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
+    with pytest.raises(SystemExit, match="spans 257 stages"):
         ad.main()
 
-    assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
+    assert out.read_text(encoding="utf-8") == ""
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 dependency levels; 1 stacks would apply concurrently"
+        (
+            "::notice::257 stacks, 256 after edges, 257 dependency levels; "
+            "1 stacks would apply concurrently"
+        )
     ]
 
 
@@ -562,6 +553,35 @@ _ENV_CHARSET = (
     " is not an environment name: "
     "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
 )
+
+
+def _long_targeted(monkeypatch, tmp_path, length):
+    """A targeted apply of two cells whose stack names are `length` characters long."""
+    stacks = [f"stacks/{c * length}" for c in "ab"]
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {s: set() for s in stacks}, [_apply_check(s, cells=2) for s in stacks])
+    return out
+
+
+def test_main_writes_stage_outputs_under_the_output_cap(monkeypatch, tmp_path):
+    """Mutation: `OUTPUT_CAP = 400_000` -- refuses, red."""
+    out = _long_targeted(monkeypatch, tmp_path, 117_000)
+    ad.main()
+    assert json.loads(github_outputs(out)["counts"]) == [2]
+
+
+def test_main_refuses_outputs_over_the_cap_before_the_report(monkeypatch, tmp_path):
+    """Mutation: drop the cap check -- no refusal, red. Mutation: write the report before the
+    outputs -- the report exists, red."""
+    out = _long_targeted(monkeypatch, tmp_path, 130_000)
+    with pytest.raises(SystemExit) as exc:
+        ad.main()
+    assert str(exc.value) == (
+        "::error::the outputs for 2 cells total 520959 characters (> 500000), past what a "
+        "job's outputs carry; split the change."
+    )
+    assert not out.exists()
+    assert not pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"]).exists()
 
 
 @pytest.mark.parametrize(
@@ -645,7 +665,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     )
     ad.main()
     parsed = github_outputs(out)
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
+    assert first_stage(parsed) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -865,7 +885,7 @@ def test_main_exempts_an_env_whose_entry_is_review_exempt(monkeypatch, tmp_path)
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
     )
     ad.main()
-    assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
+    assert first_stage(github_outputs(out))[0]["stack"] == "stacks/app"
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
@@ -933,41 +953,30 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
-    key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `first_level`, `head_sha` and `base_sha`, and the report file holds
-    exactly the targeted form's four fields: `review_not_required_envs`, `waiting_cells`,
-    `held_cells` and `env_order`; a targeted apply is env-level 0 alone, so levels 1-3 must say
-    `true` or apply-run.yml runs them into `fromJSON('')`.
+    key on the apply path is caught. apply-run.yml reads the stage outputs, `head_sha` and
+    `base_sha`, and the report file holds exactly the targeted form's four fields:
+    `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a targeted
+    apply is env-level 0 alone.
 
     Mutation: drop `held_cells` from `main`'s report -- red.
-    Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
-    `envlevel1`."""
+    Mutation: pass `{env: ["_"]}` as the order to `stage_outputs` -- the stage reads `L1-W0`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
     )
     ad.main()
-    empty = (
-        '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
-        '"wave6": [], "wave7": []}'
-    )
     assert out.read_text(encoding="utf-8") == (
-        'envlevel0_waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
-        '"workload": "app", '
-        '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
-        '"env_binding": "dev-eu-apply", '
-        '"plan_run_id": "42", '
-        '"plan_sha256": "dddddddddddddddd'
-        'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
-        '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
-        "envlevel0_empty=false\n"
-        f"envlevel1_waves={empty}\n"
-        "envlevel1_empty=true\n"
-        f"envlevel2_waves={empty}\n"
-        "envlevel2_empty=true\n"
-        f"envlevel3_waves={empty}\n"
-        "envlevel3_empty=true\n"
-        "first_level=0\n"
+        'levels=["{\\"L0-W0\\": [{\\"stack\\": \\"stacks/app\\", \\"environment\\": '
+        '\\"dev-eu\\", \\"workload\\": \\"app\\", \\"role_arn\\": \\"\\", '
+        '\\"cred_region\\": \\"\\", \\"tf_vars\\": {}, \\"config_path\\": \\"apply\\", '
+        '\\"env_binding\\": \\"dev-eu-apply\\", \\"plan_run_id\\": \\"42\\", '
+        '\\"plan_sha256\\": \\"dddddddddddddddd'
+        'dddddddddddddddddddddddddddddddddddddddddddddddd\\"}]}"]\n'
+        'stages=[{"key": "L0-W0", "n": 0, "level": 0, "first": true}]\n'
+        'keys=["L0-W0"]\n'
+        "counts=[1]\n"
+        'cells=[{"stack": "stacks/app", "environment": "dev-eu"}]\n'
+        "empty=false\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "base_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
     )
@@ -980,22 +989,8 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     }
 
 
-@pytest.mark.parametrize(
-    ("populated", "expected"),
-    [({0}, "0"), ({0, 2}, "0"), ({1, 3}, "1"), (set(), "")],
-    ids=["0", "0-2", "1-3", "none"],
-)
-def test_the_first_level_is_the_lowest_populated_one(populated, expected):
-    """`lock` snapshots and releases this level for its call. Mutation: `first_level` always
-    `'0'` -- red on 1-3 and none."""
-    cell = {"stack": "s", "environment": "e"}
-    per_level = [{"wave0": [cell] if n in populated else [], "wave1": []} for n in range(4)]
-    assert ad.first_level(per_level) == expected
-
-
-def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
-    """Mutation: iterate `w0` instead of `w0.values()` in the notice -- it prints the key
-    lengths `[5, 5, ...]` and `empty=False`."""
+def test_main_notice_counts_every_stage(monkeypatch, tmp_path, capsys):
+    """Mutation: print `stages['keys']` for `stages=` in the notice -- red."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
@@ -1006,7 +1001,7 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
         "cells=2 completed=0 pending=2 waiting=0 locked=0 "
-        "waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False" in capsys.readouterr().out.splitlines()
+        "stages=[1, 1] empty=False" in capsys.readouterr().out.splitlines()
     )
 
 
@@ -1322,9 +1317,7 @@ def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
-        "stacks/app"
-    ]
+    assert [c["stack"] for c in first_stage(github_outputs(out))] == ["stacks/app"]
 
 
 def test_main_refuses_an_unusable_pull_request_number(monkeypatch, tmp_path):
@@ -1359,8 +1352,7 @@ def _zigzag(monkeypatch, tmp_path, checks, table=None):
     monkeypatch.setattr(ad.bm, "all_tags", lambda: _ZIGZAG_TAGS)
     ad.main()
     parsed = github_outputs(out)
-    waves = json.loads(parsed["envlevel0_waves"])
-    return [c["stack"] for w in waves.values() for c in w], detect_report()["waiting_cells"]
+    return [c["stack"] for c in wave_cells(parsed)], detect_report()["waiting_cells"]
 
 
 def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, tmp_path):
@@ -1417,7 +1409,7 @@ def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, cap
     _zigzag(monkeypatch, tmp_path, checks)
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
-        "cells=1 completed=0 pending=1 waiting=1 locked=0 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
+        "cells=1 completed=0 pending=1 waiting=1 locked=0 stages=[] empty=True"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -1434,8 +1426,7 @@ def _locked_run(monkeypatch, tmp_path, locks, lock_reads=None, checks=_LOCK_CHEC
         monkeypatch.setattr(ad.bm, "all_tags", lambda: tags)
     ad.main()
     parsed = github_outputs(out)
-    waves = json.loads(parsed["envlevel0_waves"])
-    return parsed, [c["stack"] for w in waves.values() for c in w]
+    return parsed, [c["stack"] for c in wave_cells(parsed)]
 
 
 def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits(
@@ -1461,7 +1452,7 @@ def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits
     ]
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} cells=3 completed=0 "
-        "pending=3 waiting=1 locked=1 waves=[1, 0, 0, 0, 0, 0, 0, 0] empty=False"
+        "pending=3 waiting=1 locked=1 stages=[1] empty=False"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -1583,7 +1574,7 @@ def test_a_targeted_apply_refuses_a_behind_cell_of_its_environment(
     else:
         ad.main()
         parsed = github_outputs(out)
-        assert len(json.loads(parsed["envlevel0_waves"])["wave0"]) == 1
+        assert len(first_stage(parsed)) == 1
         assert parsed["base_sha"] == BASE_TIP
     assert base_calls == [(BASE_TIP, ["stacks/app"], ["stacks/app", "stacks/idle"])]
 
@@ -1786,9 +1777,7 @@ def test_a_targeted_apply_refuses_a_cell_another_run_holds_unless_it_never_appli
     )
     if refusal is None:
         ad.main()
-        assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == (
-            "stacks/app"
-        )
+        assert first_stage(github_outputs(out))[0]["stack"] == ("stacks/app")
         return
     with pytest.raises(SystemExit) as exc:
         ad.main()
@@ -1906,7 +1895,7 @@ def _waiting(
 
 
 def _applied_cells(out):
-    return [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]]
+    return [c["stack"] for c in first_stage(github_outputs(out))]
 
 
 def _refused(out):
@@ -2209,5 +2198,5 @@ def test_a_targeted_apply_retries_a_cell_an_earlier_apply_run_attempted(
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [check])
     ad.main()
-    assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
+    assert first_stage(github_outputs(out))[0]["stack"] == "stacks/app"
     assert detect_report()["held_cells"] == []

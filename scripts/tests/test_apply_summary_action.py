@@ -43,47 +43,14 @@ _AMBIENT_GHA_VARS = frozenset({"GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB
 # Read with a default equal to the directory the download step writes, so the step feeds none.
 _SCRIPT_DEFAULTED = frozenset({"CELLS"})
 
-_SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
-_GET_RE = re.compile(r'os\.environ\.get\(\s*f?([\'"])([A-Za-z0-9_{}]+)\1')
-_RANGE_RE = re.compile(r"range\((\d+|(?:[a-z]+\.)?[A-Z][A-Z0-9_]*)\)")
-_PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
-
-
-def _range_width(token):
-    """The N in a `range(N)` bound: a literal, or a constant of `scripts/apply-comment` or of a
-    module it loads (`wv.MAX_ENV_LEVELS`), read off the loaded module."""
-    if token.isdigit():
-        return int(token)
-    width = _APPLY_COMMENT
-    for attr in token.split("."):
-        width = getattr(width, attr, None)
-    assert isinstance(width, int), f"range({token}) is not an int constant of apply-comment"
-    return width
+_SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*([\'"])([A-Za-z0-9_]+)\1\s*\]')
+_GET_RE = re.compile(r'os\.environ\.get\(\s*([\'"])([A-Za-z0-9_]+)\1')
 
 
 def _read_names():
-    """Every environment variable name `scripts/apply-comment` reads, derived from its source.
-
-    A literal name is captured as-is. A name carrying an f-string placeholder -- only
-    `SHIPMATE_ENVLEVEL{i}_WAVES`, expanded over the `range(...)` on the same source line -- is
-    expanded to its concrete instances, so the derived set is comparable to an `env:` block's
-    keys."""
-    names = set()
-    for line in SCRIPT.read_text(encoding="utf-8").splitlines():
-        raws = [m.group(2) for m in _SUBSCRIPT_RE.finditer(line)]
-        raws += [m.group(2) for m in _GET_RE.finditer(line)]
-        for raw in raws:
-            if "{" not in raw:
-                names.add(raw)
-                continue
-            rm = _RANGE_RE.search(line)
-            assert rm, (
-                f"env var pattern {raw!r} carries an f-string placeholder but "
-                f"no range(N) on the same line to expand it against: {line!r}"
-            )
-            for i in range(_range_width(rm.group(1))):
-                names.add(_PLACEHOLDER_RE.sub(str(i), raw, count=1))
-    return names
+    """Every environment variable name `scripts/apply-comment` reads, derived from its source."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    return {m.group(2) for rx in (_SUBSCRIPT_RE, _GET_RE) for m in rx.finditer(text)}
 
 
 def _find_step(steps, *, uses_contains=None, run_contains=None):
@@ -125,10 +92,7 @@ def test_render_step_feeds_every_env_var_the_script_reads():
 # test_render_step_env_block_matches_the_expected_mapping.
 _RENDER_ENV = {
     "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
-    "SHIPMATE_ENVLEVEL0_WAVES": "${{ inputs.envlevel0-waves }}",
-    "SHIPMATE_ENVLEVEL1_WAVES": "${{ inputs.envlevel1-waves }}",
-    "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
-    "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
+    "SHIPMATE_CELLS": "${{ inputs.cells }}",
     "SHIPMATE_RESULTS": "${{ inputs.results }}",
     "SHIPMATE_REPORT_PATH": "apply-report/report.json",
     "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
@@ -309,10 +273,7 @@ def test_declared_inputs_are_exactly_these():
     assert set(action_yaml("apply-summary")["inputs"]) == {
         "pr-number",
         "environment",
-        "envlevel0-waves",
-        "envlevel1-waves",
-        "envlevel2-waves",
-        "envlevel3-waves",
+        "cells",
         "detect-result",
         "detect-refusal",
         "lock-refusal",

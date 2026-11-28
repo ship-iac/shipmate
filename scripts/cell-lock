@@ -21,8 +21,8 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 `::error::` (also written to the step output `refusal`, with `refused_by_rule=true` for an
 `acquire` refused by another holder's lock):
 
-- `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
-  pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
+- `acquire`: locks every cell of `SHIPMATE_CELLS` for pull request `SHIPMATE_PR_NUMBER`, then
+  fences the acquisition against a close.
 - `release`: `SHIPMATE_MERGED` `true` deletes the pull request's locks except those whose apply
   check is pending on `SHIPMATE_HEAD_SHA`, and every one of them with `SHIPMATE_RELEASE_PENDING`
   `true` (a deploy refused before applying any cell); `false` deletes them all while the pull
@@ -636,18 +636,13 @@ def pending_names(lines, app_id):
     return set(ag.latest_by_name(runs)) - ag.done_names(runs)
 
 
-def _wave_cells():
-    cells = []
-    for n in range(4):
-        name = f"SHIPMATE_ENVLEVEL{n}_WAVES"
-        try:
-            cells += [c for wave in json.loads(os.environ[name]).values() for c in wave]
-        except (KeyError, ValueError, AttributeError, TypeError):
-            raise SystemExit(f"::error::{name} must be a JSON map of waves") from None
-    checked = cell_names(json.dumps(cells))
-    if checked is None:
-        raise SystemExit("::error::every wave cell must be a {stack, environment} object")
-    return checked
+def _run_cells():
+    cells = cell_names(os.environ.get("SHIPMATE_CELLS", ""))
+    if cells is None:
+        raise SystemExit(
+            "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+        )
+    return cells
 
 
 def _head_names(repo, run, sha=None):
@@ -663,7 +658,7 @@ def _acquire_cmd(repo, pr, run):
             f"::error::GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be decimal (got: {ids!r})"
         )
     acquisition = ".".join(ids)
-    locks = acquire(repo, _wave_cells(), pr, acquisition, run=run)
+    locks = acquire(repo, _run_cells(), pr, acquisition, run=run)
     print(f"::notice::pull request #{pr} holds {len(locks)} cell lock(s)")
 
 

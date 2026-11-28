@@ -1,4 +1,6 @@
 import json
+import os
+import pathlib
 
 import pytest
 from _detect_fixtures import (
@@ -18,6 +20,7 @@ from _detect_fixtures import (
     check_run,
     dispatched_plan,
     fake_clock,
+    first_stage,
     forbid_shared_runner,
     foreign_message,
     held,
@@ -30,6 +33,7 @@ from _detect_fixtures import (
     routed,
     run_graph_capture,
     spy_env_config,
+    stage_map,
     stub_base_changed,
     stub_read_locks,
     stub_read_table,
@@ -156,7 +160,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
             check_run(name="apply / dev-eu / stacks/app", id=2, app={"id": 15368}),
         ],
     )
-    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 def test_membership_is_read_over_the_whole_tree_with_no_other_keyword(tmp_path, monkeypatch):
@@ -169,16 +173,15 @@ def test_membership_is_read_over_the_whole_tree_with_no_other_keyword(tmp_path, 
 
 def test_reuses_single_sourced_helpers():
     """The `is not None` lines pin only that the bare form's helpers still exist under these
-    names; the behavioural bare_main() tests above pin that it calls them. Env-level bucketing
-    and the GITHUB_OUTPUT writer live in waves, shared with deploy-detect, so this module never
+    names; the behavioural bare_main() tests above pin that it calls them. Stage bucketing
+    lives in waves, shared with deploy-detect, so this module never
     loads deploy-detect.
 
     Mutation: add a module-level `dd = None` to apply-detect -- the `dd` line reddens."""
     assert aad.paths_with_checks is not None
     assert aad.cells_for_env is not None
     assert aad.with_plan_runs is not None
-    assert aad.wv.env_level_waves is not None
-    assert aad.wv.env_level_outputs is not None
+    assert aad.wv.stage_outputs is not None
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "cells_from_artifacts")
 
@@ -344,7 +347,7 @@ def _run_main(
 
 
 def _wave_envs(parsed):
-    return sorted(c["environment"] for c in wave_cells(aad.wv, parsed))
+    return sorted(c["environment"] for c in wave_cells(parsed))
 
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
@@ -357,7 +360,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         checks=[_apply_check("stacks/app", "dev-eu", plan_run="42", cells=1)],
         tags={"stacks/app": ["env/dev-eu", "workload/net-edge"]},
     )
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
+    assert first_stage(parsed) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -397,7 +400,7 @@ def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monk
     the pull request and its base tip, for the behind check."""
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
-    assert len(wave_cells(aad.wv, parsed)) == 1  # Not vacuous: a cell exists.
+    assert len(wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [
         *PLAN_LISTINGS,
         CHECK_RUNS_URL,
@@ -418,7 +421,7 @@ def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
         tags={"a/b": [], "a-b": []},
         checks=[_apply_check("a-b", "dev-eu", cells=1)],
     )
-    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["a-b"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["a-b"]
 
 
 def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeypatch):
@@ -435,7 +438,7 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
             _apply_check("stacks/app", "dev-us", plan_run="222", cells=1),
         ],
     )
-    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(aad.wv, parsed)) == [
+    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(parsed)) == [
         ("dev-eu", "111"),
         ("dev-us", "222"),
     ]
@@ -604,7 +607,7 @@ def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
             )
         ],
     )
-    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypatch):
@@ -906,9 +909,10 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
         decision="APPROVED",
     )
     assert detect_report()["excluded_envs"] == ["prod-eu"]
-    assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
-    assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
-    assert parsed["first_level"] == "0"
+    assert {k: [c["environment"] for c in v] for k, v in stage_map(parsed).items()} == {
+        "L0-W0": ["dev-eu"],
+        "L1-W0": ["dev-us"],
+    }
 
 
 def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
@@ -958,17 +962,16 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
     )
 
 
-def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
+def test_main_prints_the_dag_shape_notice_before_a_stage_count_refusal(
     tmp_path, monkeypatch, capsys
 ):
-    """The notice is the line that explains a run too deep for the pre-declared wave jobs, so it
-    prints before `env_level_waves` refuses.
+    """The notice is the line that explains a run of more stages than a matrix holds, so it
+    prints before `stage_outputs` refuses.
 
-    Mutations: print the DAG-shape notice after `env_level_waves` -- the notice is missing; drop
-    "populated " from `pad_waves`' refusal -- the match fails.
+    Mutation: print the DAG-shape notice after `stage_outputs` -- the notice is missing.
     """
-    stacks = [f"stacks/s{i}" for i in range(aad.wv.MAX_WAVES + 1)]
-    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
+    stacks = [f"stacks/s{i}" for i in range(257)]
+    with pytest.raises(SystemExit, match="spans 257 stages"):
         _run_main(
             tmp_path,
             monkeypatch,
@@ -976,12 +979,49 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
             decision="APPROVED",
             tree={"dev-eu": stacks},
             tags={s: [] for s in stacks},
-            checks=[_apply_check(s, "dev-eu", cells=9) for s in stacks],
+            checks=[_apply_check(s, "dev-eu", cells=257) for s in stacks],
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 dependency levels; 1 stacks would apply concurrently"
+        (
+            "::notice::257 stacks, 256 after edges, 257 dependency levels; "
+            "1 stacks would apply concurrently"
+        )
     ]
+
+
+def _long_bare(tmp_path, monkeypatch, length):
+    """A bare apply of two dev-eu cells whose stack names are `length` characters long."""
+    stacks = [f"stacks/{c * length}" for c in "ab"]
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu"],
+        decision="APPROVED",
+        tree={"dev-eu": stacks},
+        tags={s: [] for s in stacks},
+        checks=[_apply_check(s, "dev-eu", cells=2) for s in stacks],
+        deps={s: set() for s in stacks},
+    )
+
+
+def test_main_writes_stage_outputs_under_the_output_cap(tmp_path, monkeypatch):
+    """Mutation: `OUTPUT_CAP = 400_000` -- refuses, red."""
+    parsed = _long_bare(tmp_path, monkeypatch, 117_000)
+    assert json.loads(parsed["counts"]) == [2]
+
+
+def test_main_refuses_outputs_over_the_cap_before_the_report(tmp_path, monkeypatch):
+    """Mutations: drop `cap_cells` from `bare_main`'s `write_outputs` call -- no refusal, red;
+    write the report before the outputs in `bare_main` -- the report exists, red."""
+    with pytest.raises(SystemExit) as exc:
+        _long_bare(tmp_path, monkeypatch, 130_000)
+    assert str(exc.value) == (
+        "::error::the outputs for 2 cells total 520953 characters (> 500000), past what a "
+        "job's outputs carry; split the change."
+    )
+    assert not (tmp_path / "out").exists()
+    assert not pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"]).exists()
 
 
 def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
@@ -997,8 +1037,7 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
     ]
     assert notices == [
         (
-            f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
-            "0] "
+            f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 stages=[1] "
             "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
             "overlap=0 attempted=0 applied_exempt=[] "
             "review_decision='APPROVED'"
@@ -1047,7 +1086,7 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
             _apply_check("stacks/app", "prod-eu", pr="7", cells=3),
         ],
     )
-    assert [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)] == [
+    assert [(c["stack"], c["environment"]) for c in wave_cells(parsed)] == [
         ("stacks/app", "dev-eu")
     ]
     assert detect_report()["review_held_envs"] == ["dev-us", "prod-eu"]
@@ -1096,7 +1135,7 @@ def _cross_env(tmp_path, monkeypatch, checks, **kw):
 
 
 def _applied(parsed):
-    return [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)]
+    return [(c["stack"], c["environment"]) for c in wave_cells(parsed)]
 
 
 def test_main_holds_only_the_cell_whose_upstream_is_held(tmp_path, monkeypatch):
@@ -1321,7 +1360,7 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
         decision="APPROVED",
     )
     assert _applied(parsed) == []
-    assert parsed["first_level"] == ""
+    assert parsed["empty"] == "true"
     assert detect_report()["waiting_cells"] == [
         {"stack": "b", "environment": "e0", "after_stack": "c", "after_environment": "ex"},
         {"stack": "r", "environment": "e1", "after_stack": "c", "after_environment": "ex"},
@@ -1329,7 +1368,7 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
     assert detect_report()["skipped_envs"] == []
     assert detect_report()["excluded_envs"] == ["ex"]
     assert (
-        f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
+        f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 stages=[] "
         "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 locked=0 "
         "overlap=0 attempted=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
@@ -1385,7 +1424,7 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
     ]
     assert detect_report()["skipped_envs"] == ["prod-eu"]
     assert (
-        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
+        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 stages=[1] "
         "excluded_targeted=[] skipped_after_targeted=['prod-eu'] review_held=[] waiting=1 "
         "locked=1 overlap=0 attempted=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
@@ -1650,7 +1689,7 @@ def test_a_bare_apply_checks_only_the_cells_it_would_apply(
         assert e.value.code == behind_message(refused)
     else:
         parsed = _run_main(tmp_path, monkeypatch, **kw)
-        assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+        assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
         assert parsed["base_sha"] == BASE_TIP
     assert base_calls == [(BASE_TIP, ["stacks/app"], ["stacks/app", "stacks/db"])]
 
@@ -1738,7 +1777,7 @@ def test_a_bare_apply_waits_for_a_live_plan_run_before_reading_the_checks(tmp_pa
         {9: ["completed"]},
         decision="APPROVED",
     )
-    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
     assert clock.sleeps == [30, 5]
     assert urls == [
         *PLAN_LISTINGS,

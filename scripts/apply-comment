@@ -32,6 +32,7 @@ import sys
 
 from _shipmate import (
     _load,
+    cell_names,
     cell_summaries,
     command_data,
     current_run_url,
@@ -49,7 +50,6 @@ ag = _load("apply-gate")
 # COUPLING: the only parser of tofu's lock output in the engine, shared with
 # actions/unlock-cell so the note and the unlock can never name different locks.
 li = _load("lock-info")
-wv = _load("waves")
 
 CELL_KEYS = {"stack": str, "environment": str, "result": str, "reason": str}
 _RESULTS = frozenset({"applied", "failed", "blocked"})
@@ -309,18 +309,18 @@ def load_cells(cells_dir):
 
 
 def _expected_cells():
-    """Union of every wave array in the SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (a
-    targeted apply fills level 0 alone); '' contributes nothing. Cell identity is
-    (environment, stack) -- a wave element is
-    `{"stack": "<stack path>", "environment": "<env>"}`."""
-    raws = (os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") for i in range(wv.MAX_ENV_LEVELS))
-    return {
-        (item["environment"], item["stack"])
-        for raw in raws
-        if raw
-        for cells in json.loads(raw).values()
-        for item in cells
-    }
+    """The (environment, stack) of every cell in `SHIPMATE_CELLS`, the detect's `cells` output.
+    Empty or absent reads as no cell, so a failed detect still gets its refusal reply; anything
+    else that is not a list of `{stack, environment}` objects refuses."""
+    raw = os.environ.get("SHIPMATE_CELLS", "")
+    if not raw:
+        return set()
+    cells = cell_names(raw)
+    if cells is None:
+        raise SystemExit(
+            "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+        )
+    return {(c["environment"], c["stack"]) for c in cells}
 
 
 def build_rows(expected, downloaded):

@@ -23,7 +23,7 @@ import test_build_matrix as tbm
 import test_deploy_detect as tdd
 import test_row_stamp_guard as trs
 import test_unlock_detect as tud
-from _detect_fixtures import PLAN_SHA, _apply_check, check_run
+from _detect_fixtures import PLAN_SHA, _apply_check, check_run, first_stage
 from _loader import github_outputs
 
 _ROLE = "arn:aws:iam::1:role/net"
@@ -240,7 +240,7 @@ def test_the_deploy_refuses_an_outside_tag_only_on_a_pending_cell(monkeypatch, t
             run()
         assert exc.value.code == _GAP_ERROR
     else:
-        assert json.loads(run()["envlevel0_waves"])["wave0"] == []
+        assert first_stage(run()) == []
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
@@ -257,7 +257,7 @@ def test_the_targeted_apply_refuses_an_outside_tag_only_on_a_pending_cell(
         assert exc.value.code == _GAP_ERROR
     else:
         tad.ad.main()
-        assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"] == []
+        assert first_stage(github_outputs(out)) == []
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])

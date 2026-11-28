@@ -341,16 +341,19 @@ def partial_message(listed, *, rerun, several=False, merged=False):
     )
 
 
-def wave_cells(wv, parsed):
-    """Every cell in the `envlevel<n>_waves` outputs `parsed`, flattened, sized by `waves`
-    module `wv`."""
-    return [
-        c
-        for lvl in range(wv.MAX_ENV_LEVELS)
-        for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
-        for i in range(wv.MAX_WAVES)
-        for c in w[f"wave{i}"]
-    ]
+def stage_map(parsed):
+    """`{key: cells}` over every level of the `levels` output in `parsed`, in run order."""
+    return {k: v for raw in json.loads(parsed["levels"]) for k, v in json.loads(raw).items()}
+
+
+def wave_cells(parsed):
+    """Every cell of the `levels` output in `parsed`, flattened in run order."""
+    return [c for cells in stage_map(parsed).values() for c in cells]
+
+
+def first_stage(parsed):
+    """The cells of the first stage in `parsed`, or `[]` when it has none."""
+    return next(iter(stage_map(parsed).values()), [])
 
 
 #: What a detect reads when a test names no table. `layout` is required, and `folder` derives

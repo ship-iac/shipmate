@@ -8,20 +8,8 @@ inputs:
     description: Environment name for the targeted apply form. Empty = the all-environments form.
     required: false
     default: ""
-  envlevel0-waves:
-    description: Env-level 0 waves JSON; a targeted apply puts every cell here. A padded empty map when level 0 has no cell. Empty when detect did not succeed.
-    required: false
-    default: ""
-  envlevel1-waves:
-    description: Env-level 1 waves JSON; a padded empty map when level 1 has no cell, as in every targeted apply. Empty when detect did not succeed.
-    required: false
-    default: ""
-  envlevel2-waves:
-    description: Env-level 2 waves JSON; a padded empty map when level 2 has no cell, as in every targeted apply. Empty when detect did not succeed.
-    required: false
-    default: ""
-  envlevel3-waves:
-    description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply. Empty when detect did not succeed.
+  cells:
+    description: apply-detect's `cells` output, a JSON list of `{stack, environment}`. Empty when detect did not succeed, which reads as no expected cell.
     required: false
     default: ""
   detect-result:
@@ -118,10 +106,7 @@ runs:
       shell: bash
       env:
         SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
-        SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}
-        SHIPMATE_ENVLEVEL1_WAVES: ${{ inputs.envlevel1-waves }}
-        SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
-        SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
+        SHIPMATE_CELLS: ${{ inputs.cells }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
         SHIPMATE_REPORT_PATH: apply-report/report.json
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}

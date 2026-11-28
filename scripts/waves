@@ -3,8 +3,8 @@
 
 Stack-waves are topological levels of the run-graph. Ordering is over the FULL
 graph, then filtered to the work set, so transitive order through unchanged
-stacks is preserved; the empty levels are dropped before padding, so the first
-populated level is `wave0`.
+stacks is preserved. A wave keeps its full-graph index, so a shrinking work set
+keeps a cell's stage key.
 
 Env-levels come from each environment's `needs` in `.github/shipmate-config.yml`:
 the envs that must fully apply before it, collected by `env-config.env_order`
@@ -17,26 +17,10 @@ Nothing here reads anything: the callers pass the mapping `env-config` already
 loaded for the operation, which comes from the default branch. A pull request
 therefore cannot reorder its own apply waves or drop its own exclusion.
 
-`MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
-Bumping it needs, per new level N:
-- `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
-  actions/apply-detect/action.yml, and the '0' to '3' range in apply-detect's `first_level`
-  description;
-- in .github/workflows/deploy.yml, the `detect` outputs, an `envlevelN` job named `L<N>`, its
-  `needs:` listing every lower envlevel job, and its entry in `summary`'s `needs:`;
-- in .github/workflows/apply-run.yml, a level-N copy of every `envlevel3` and
-  `first_level == '3'` site: the `detect` outputs, an `envlevelN` job named `L<N>` with its
-  `needs:` listing every lower envlevel job and its `by_wave` selector, a
-  `jobs.envlevelN.result == 'cancelled'` term in the `run_cancelled` output, the `needs:`
-  entries of `unflip` and `summary`, `lock`'s `envlevelN-waves` input and `waves-json`
-  selectors, `unflip`'s `if:` and `resnap`, and the `envlevelN-waves` input on the `summary`
-  step;
-- an `envlevelN-waves` input, with its `SHIPMATE_ENVLEVELN_WAVES` env line, on
-  actions/lock-acquire/action.yml and actions/apply-summary/action.yml;
-- the `range(4)` over `SHIPMATE_ENVLEVEL<n>_WAVES` in scripts/cell-lock, and its docstring
-  naming `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES`.
+`stage_outputs` keys each populated (env-level, wave) pair `L<i>-W<w>`; the callers
+run those stages in order, one at a time.
 
-A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
+A module, never a program: the detects and `build-matrix` `_load` it.
 It runs nothing on import -- it only defines functions and constants.
 """
 
@@ -46,9 +30,9 @@ from graphlib import CycleError, TopologicalSorter
 
 from _shipmate import StackCycle
 
-MAX_WAVES = 8
-# Cap on env-DAG depth. COUPLED to fixed GHA job and output slots; see the module docstring.
-MAX_ENV_LEVELS = 4
+#: GitHub's matrix cap: the stage matrix holds one row per stage, a stage's cell matrix one per
+#: cell.
+MATRIX_LIMIT = 256
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
 _EDGE = re.compile(r"^\s*(\w+)\s*->\s*(\w+)")
 
@@ -121,23 +105,6 @@ def assign_waves(levels_, cells):
     return waves
 
 
-def pad_waves(waves):
-    """The populated `waves`, in order, as a {wave0..wave{MAX_WAVES-1}: cells} dict, padded.
-
-    Empty levels are dropped first, so only populated levels count against the
-    pre-declared wave0..wave7 jobs; more than MAX_WAVES of them refuse.
-
-    Every key is always present -- apply-env-level.yml indexes
-    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
-    waves = [w for w in waves if w]
-    if len(waves) > MAX_WAVES:
-        raise SystemExit(
-            f"::error::change spans {len(waves)} populated dependency levels (> {MAX_WAVES}); "
-            "split the PR."
-        )
-    return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
-
-
 def blocked_envs(order, unavailable, envs):
     """Envs in `envs` with an unavailable env among their transitive
     predecessors (per `order`). The bare-apply path skips these with a notice:
@@ -177,31 +144,64 @@ def env_sequence(order, envs):
     return sorted(envs, key=lambda e: (level[e], e))
 
 
-def env_level_waves(cells, order, deps):
-    """Return a list of MAX_ENV_LEVELS dicts, each {wave0..wave7: [cells]}.
+def stage_outputs(order, deps, cells):
+    """The stage outputs for `write_outputs`, shared by deploy-detect and both apply-detect forms.
 
-    Cells are bucketed by their env's level in `order`, then stack-wave-ordered
-    within it. Env-levels apply fully in order: level 0 entirely before level 1,
-    and so on. Shared by deploy-detect (merge path) and both apply-detect forms: the bare
-    `shipmate apply`, and the targeted `shipmate apply <env>`, which passes an
-    empty order: that puts every cell at level 0.
+    Cells are bucketed by their env's level in `order` (`env_levels`), then by their stack's
+    full-graph wave (`assign_waves`); each populated bucket is the stage `L<i>-W<w>`, run in
+    numeric (i, w) order. The targeted `shipmate apply <env>` passes an empty order: one level.
 
-    Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
-    `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
-    cells apply nothing under a run that still reports success."""
+    - `levels`: a JSON list, one JSON *string* per populated env-level, of `{key: [cell, ...]}`.
+    - `stages`: a JSON list in run order of `{key, n, level, first}`; `level` indexes `levels`,
+      `first` marks the first stage of its level.
+    - `keys`, `counts`: JSON lists in run order of the stage keys and their cell counts.
+    - `cells`: a JSON list of every cell's `{stack, environment}`, in run order.
+    - `empty`: true when there is no stage.
+
+    Refuses more than `MATRIX_LIMIT` stages, or a stage of more than `MATRIX_LIMIT` cells."""
     env_level = env_levels(order, {c["environment"] for c in cells})
-    over = [e for e, lv in env_level.items() if lv >= MAX_ENV_LEVELS]
-    if over:
-        raise SystemExit(
-            f"::error::env order spans more than {MAX_ENV_LEVELS} levels "
-            f"({sorted(over)}); flatten the env dependency chain."
-        )
     graph_levels = stack_levels(deps)
-    out = []
-    for lvl in range(MAX_ENV_LEVELS):
-        bucket = [c for c in cells if env_level[c["environment"]] == lvl]
-        out.append(pad_waves(assign_waves(graph_levels, bucket)))
-    return out
+    stages = {}
+    for i in sorted(set(env_level.values())):
+        bucket = [c for c in cells if env_level[c["environment"]] == i]
+        for w, wave in enumerate(assign_waves(graph_levels, bucket)):
+            if wave:
+                stages[(i, w)] = wave
+    if len(stages) > MATRIX_LIMIT:
+        raise SystemExit(
+            f"::error::the apply spans {len(stages)} stages (> {MATRIX_LIMIT}), one per "
+            "populated env-level and stack-wave pair; split the change."
+        )
+    rows = [(f"L{i}-W{w}", i, stages[(i, w)]) for i, w in sorted(stages)]
+    for key, _, stage in rows:
+        if len(stage) > MATRIX_LIMIT:
+            raise SystemExit(
+                f"::error::stage {key} holds {len(stage)} cells (> {MATRIX_LIMIT}); "
+                "split the change."
+            )
+    populated = sorted({i for _, i, _ in rows})
+    return {
+        "levels": json.dumps(
+            [json.dumps({k: s for k, i, s in rows if i == lvl}) for lvl in populated]
+        ),
+        "stages": json.dumps(
+            [
+                {
+                    "key": k,
+                    "n": n,
+                    "level": populated.index(i),
+                    "first": n == 0 or rows[n - 1][1] != i,
+                }
+                for n, (k, i, _) in enumerate(rows)
+            ]
+        ),
+        "keys": json.dumps([k for k, _, _ in rows]),
+        "counts": json.dumps([len(s) for _, _, s in rows]),
+        "cells": json.dumps(
+            [{"stack": c["stack"], "environment": c["environment"]} for _, _, s in rows for c in s]
+        ),
+        "empty": not rows,
+    }
 
 
 def _envs_of(tags, stack):
@@ -359,16 +359,3 @@ def waiting_cells(run, pending, deps, tags, level):
         {"stack": s, "environment": e, "after_stack": b[0], "after_environment": b[1]}
         for (s, e), b in sorted(blocker.items(), key=lambda kv: (kv[0][1], kv[0][0]))
     ]
-
-
-def env_level_outputs(per_level):
-    """`{envlevelN_waves: JSON, envlevelN_empty: bool}` for a list of per-env-level wave
-    dicts, for `write_outputs`. Shared by deploy-detect and both apply-detect forms so the
-    env-level output contract that the reusable apply-env-level.yml consumes stays
-    single-sourced -- a format drift between the detect paths would silently break that
-    shared consumer."""
-    out = {}
-    for lvl, w in enumerate(per_level):
-        out[f"envlevel{lvl}_waves"] = json.dumps(w)
-        out[f"envlevel{lvl}_empty"] = not any(w.values())
-    return out

@@ -12,10 +12,12 @@ from _detect_fixtures import (
     _apply_check,
     answering_run_graph,
     behind_check,
+    first_stage,
     forbid_shared_runner,
     partial_message,
     run_graph_capture,
     spy_env_config,
+    stage_map,
     stub_read_table,
     wave_cells,
 )
@@ -550,7 +552,7 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
         checks=[_apply_check("stacks/app", cells=1)],
         urls=urls,
     )
-    assert len(wave_cells(dd.wv, parsed)) == 1  # Not vacuous: a cell exists.
+    assert len(wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL, LOCKS_URL]
 
 
@@ -604,7 +606,7 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
             _apply_check("stacks/app", "dev-us", plan_run="222", cells=1),
         ],
     )
-    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(dd.wv, parsed)) == [
+    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(parsed)) == [
         ("dev-eu", "111"),
         ("dev-us", "222"),
     ]
@@ -738,7 +740,7 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
             _check(name="apply / dev-us / stacks/app", external_id="b" * 64),
         ],
     )
-    assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu"]
+    assert [c["environment"] for c in wave_cells(parsed)] == ["dev-eu"]
 
 
 def test_main_refuses_a_cell_whose_only_check_is_named_stack_first(tmp_path, monkeypatch):
@@ -776,22 +778,16 @@ def test_a_transposed_one_segment_cell_reads_the_stack_first_check_as_its_own(
         "conclusion": "success",
     }
     parsed = _run_main(tmp_path, monkeypatch, cells=[_cell("dev-us", "dns")], checks=[done])
-    empty = (
-        '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
-        '"wave6": [], "wave7": []}'
-    )
     assert parsed == {
         "head_sha": HEAD,
         "pr_number": "7",
         "push": '{"stacks": ["dev-us"], "outside": true}',
-        "envlevel0_waves": empty,
-        "envlevel0_empty": "true",
-        "envlevel1_waves": empty,
-        "envlevel1_empty": "true",
-        "envlevel2_waves": empty,
-        "envlevel2_empty": "true",
-        "envlevel3_waves": empty,
-        "envlevel3_empty": "true",
+        "levels": "[]",
+        "stages": "[]",
+        "keys": "[]",
+        "counts": "[]",
+        "cells": "[]",
+        "empty": "true",
         "warm": '[{"stack": "", "tf_vars": {}}]',
         "max_parallel": "10",
     }
@@ -820,7 +816,7 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             ],
         ),
     )
-    assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
+    assert [c["environment"] for c in wave_cells(parsed)] == ["dev-eu", "dev-us"]
 
 
 def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
@@ -838,7 +834,7 @@ def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
     )
     assert (
         f"::notice title=deploy-detect::base= head={HEAD} cells=2 completed=1 pending=1 "
-        "envlevels=[1, 0, 0, 0] empty=False" in capsys.readouterr().out.splitlines()
+        "stages=[1] empty=False" in capsys.readouterr().out.splitlines()
     )
 
 
@@ -857,7 +853,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
             _check(name="apply / dev-eu / stacks/app", id=2, app={"id": 15368}),
         ],
     )
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
@@ -877,26 +873,72 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
     )
 
 
-def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
+def test_main_prints_the_dag_shape_notice_before_a_stage_count_refusal(
     tmp_path, monkeypatch, capsys
 ):
-    """The notice is the line that explains a run too deep for the pre-declared wave jobs, so it
-    prints before `env_level_waves` refuses.
+    """The notice is the line that explains a run of more stages than a matrix holds, so it
+    prints before `stage_outputs` refuses.
 
-    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
+    Mutation: print the DAG-shape notice after `stage_outputs` -- the notice is missing.
     """
-    stacks = [f"stacks/s{i}" for i in range(dd.ad.wv.MAX_WAVES + 1)]
-    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
+    stacks = [f"stacks/s{i}" for i in range(257)]
+    with pytest.raises(SystemExit, match="spans 257 stages"):
         _run_main(
             tmp_path,
             monkeypatch,
             cells=[_cell(s) for s in stacks],
-            checks=[_apply_check(s, cells=9) for s in stacks],
+            checks=[_apply_check(s, cells=257) for s in stacks],
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 dependency levels; 1 stacks would apply concurrently"
+        (
+            "::notice::257 stacks, 256 after edges, 257 dependency levels; "
+            "1 stacks would apply concurrently"
+        )
     ]
+
+
+#: Two cells whose stage outputs total about 468,000 characters: under the 500,000 cap alone.
+_LONG_STACKS = [f"stacks/{c * 117_000}" for c in "ab"]
+
+#: A `push` of 60,000 characters, inside `PUSH_CAP`, written before the stage outputs.
+_LONG_PUSH = '{"stacks": ["' + "p" * 59_960 + '"], "outside": false}'
+
+
+def _long_deploy(tmp_path, monkeypatch):
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell(s, "dev") for s in _LONG_STACKS],
+        checks=[_apply_check(s, "dev", cells=2) for s in _LONG_STACKS],
+    )
+
+
+def test_main_writes_stage_outputs_under_the_output_cap(tmp_path, monkeypatch):
+    """The no-refusal side of the over-cap test below. Mutation: `OUTPUT_CAP = 400_000` --
+    refuses, red."""
+    parsed = _long_deploy(tmp_path, monkeypatch)
+    assert json.loads(parsed["counts"]) == [2]
+
+
+def test_main_refuses_when_the_earlier_push_carries_the_outputs_over_the_cap(tmp_path, monkeypatch):
+    """The stage outputs and `warm` fit alone; with the `push` written earlier in the step they
+    cross the cap. The early writes stay, so a refused deploy's summary still has its head.
+
+    Mutations: count only the current call's outputs in `write_outputs` -- no refusal, red;
+    drop the cap check -- no refusal, red."""
+    monkeypatch.setattr(dd, "push_stacks", lambda *_: _LONG_PUSH)
+    with pytest.raises(SystemExit) as exc:
+        _long_deploy(tmp_path, monkeypatch)
+    assert str(exc.value) == (
+        "::error::the outputs for 2 cells total 528949 characters (> 500000), past what a "
+        "job's outputs carry; split the change."
+    )
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": _LONG_PUSH,
+    }
 
 
 def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch):
@@ -905,7 +947,7 @@ def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch
     an empty ordering rather than raising.
 
     Mutation: replace `main`'s `bm.ec.env_order(table)` with `table.get("env_order", {})`
-    -- dev-us joins dev-eu in env-level 0 and envlevel1 is empty.
+    -- dev-us joins dev-eu in `L0-W0`.
     """
     parsed = _run_main(
         tmp_path,
@@ -917,8 +959,10 @@ def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch
         ],
         order={"dev-us": ["dev-eu"]},
     )
-    assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
-    assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
+    assert {k: [c["environment"] for c in v] for k, v in stage_map(parsed).items()} == {
+        "L0-W0": ["dev-eu"],
+        "L1-W0": ["dev-us"],
+    }
 
 
 def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
@@ -956,7 +1000,7 @@ def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [(c["environment"], c["stack"]) for c in wave_cells(dd.wv, parsed)] == [
+    assert [(c["environment"], c["stack"]) for c in wave_cells(parsed)] == [
         ("dev-eu", "stacks/app")
     ]
 
@@ -1191,7 +1235,7 @@ def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, m
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 def test_a_stack_holding_the_separator_is_not_its_first_segment_s_check(tmp_path, monkeypatch):
@@ -1209,7 +1253,7 @@ def test_a_stack_holding_the_separator_is_not_its_first_segment_s_check(tmp_path
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 _PLANS_AFRESH = (
@@ -1265,7 +1309,7 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
         deps={"stacks/app": set(), "stacks/gone": set()},
     )
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app"]
 
 
 _PROBE_DEPS = {
@@ -1415,9 +1459,7 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
 
     Mutation: `>=` for `>` in `inversions` -- level 0 = level 0 refuses."""
     parsed = _run_probe(tmp_path, monkeypatch, {})
-    assert [
-        (c["stack"], c["environment"]) for c in json.loads(parsed["envlevel0_waves"])["wave0"]
-    ] == [
+    assert [(c["stack"], c["environment"]) for c in first_stage(parsed)] == [
         ("dns", "dev-us"),
         ("workers", "dev-eu"),
     ]
@@ -1476,7 +1518,7 @@ def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkey
 def test_main_deploys_a_cell_the_merged_pull_request_itself_locks(tmp_path, monkeypatch):
     """Mutation: pass `0` instead of the merged pull request's number -- #12's own lock refuses."""
     parsed = _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12})
-    assert sorted(c["stack"] for c in wave_cells(dd.wv, parsed)) == ["stacks/app", "stacks/dns"]
+    assert sorted(c["stack"] for c in wave_cells(parsed)) == ["stacks/app", "stacks/dns"]
     assert "refused_locked" not in parsed
 
 
@@ -2057,7 +2099,7 @@ def test_a_stuck_job_of_another_cell_does_not_hold_the_cell(tmp_path, monkeypatc
     Mutation: count every listed job's status -- held as live, red."""
     jobs = [_job(name=WEB_APPLY, steps=[], status="in_progress"), _CANCELLED]
     parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app", "stacks/web"]
     assert "run 77 ended before applying this cell" in capsys.readouterr().err
 
 
@@ -2092,7 +2134,7 @@ def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
     Mutation: refuse on any ended run -- refuses, red.
     Mutation: drop the `Pre-apply check` clause -- the two pre-apply cases refuse, red."""
     parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app", "stacks/web"]
     warnings = [line for line in capsys.readouterr().err.splitlines() if "run 77" in line]
     assert warnings == [
         (
@@ -2338,7 +2380,7 @@ def test_a_deploy_rerun_passes_its_own_in_progress_checks(tmp_path, monkeypatch)
         urls=urls,
         attempt="2",
     )
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app", "stacks/web"]
     assert [u for u in urls if "/actions/runs/" in u] == [OWN_JOBS_PATH]
 
 
@@ -2459,7 +2501,7 @@ def test_a_queued_check_reads_no_run(tmp_path, monkeypatch):
     urls = []
     check = {**_apply_check("stacks/app", cells=2, id=1), "details_url": RUN_PAGE + HOLDER}
     parsed = _two_cells(tmp_path, monkeypatch, runs={}, check=check, urls=urls)
-    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [c["stack"] for c in wave_cells(parsed)] == ["stacks/app", "stacks/web"]
     assert [u for u in urls if "/actions/runs/" in u] == []
 
 

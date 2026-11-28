@@ -404,15 +404,34 @@ def gh_json(path, run=None, *, retry=True):
     return json.loads(retried(fetch) if retry else fetch())
 
 
-def write_outputs(**pairs):
+#: Half of GitHub's 1 MB cap on a job's outputs, which it counts in UTF-16 (workflow-syntax
+#: docs, `jobs.<job_id>.outputs`; not probed).
+OUTPUT_CAP = 500_000
+
+
+def write_outputs(*, cap_cells=None, **pairs):
     """Append each `name=value` pair to the calling step's `GITHUB_OUTPUT`, a bool as
     `true`/`false`. A value holding CR or LF would end its line early. Lines end in LF on every
-    platform."""
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
-        for name, value in pairs.items():
-            if isinstance(value, bool):
-                value = "true" if value else "false"
-            fh.write(f"{name}={value}\n")
+    platform.
+
+    With `cap_cells`, the run's cell count, refuses before writing when the step's outputs, those
+    it wrote earlier included, would total more than `OUTPUT_CAP` characters."""
+    text = "".join(
+        f"{name}={('true' if value else 'false') if isinstance(value, bool) else value}\n"
+        for name, value in pairs.items()
+    )
+    path = os.environ["GITHUB_OUTPUT"]
+    if cap_cells is not None:
+        total = len(text) + (
+            len(pathlib.Path(path).read_text(encoding="utf-8")) if os.path.exists(path) else 0
+        )
+        if total > OUTPUT_CAP:
+            raise SystemExit(
+                f"::error::the outputs for {cap_cells} cells total {total} characters "
+                f"(> {OUTPUT_CAP}), past what a job's outputs carry; split the change."
+            )
+    with open(path, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
 def decoded(run):

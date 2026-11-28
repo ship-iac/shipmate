@@ -26,7 +26,7 @@ import test_apply_detect as tad
 import test_build_matrix as tbm
 import test_deploy_detect as tdd
 import test_unlock_detect as tud
-from _detect_fixtures import PLAN_SHA, _apply_check
+from _detect_fixtures import PLAN_SHA, _apply_check, first_stage
 from _loader import SCRIPTS, github_outputs
 
 #: The scripts that emit matrix rows, and the call site in each. Hand-written, and derived from
@@ -136,7 +136,7 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
         checks=[_apply_check("stacks/app", cells=1)],
         table=_TABLE,
     )
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
+    assert first_stage(parsed) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -175,7 +175,7 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
     )
     tad.ad.main()
-    assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"] == [
+    assert first_stage(github_outputs(out)) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -196,7 +196,7 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
     parsed = taad._run_main(
         tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", table=_TABLE
     )
-    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
+    assert first_stage(parsed) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",

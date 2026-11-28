@@ -469,17 +469,17 @@ def main():
     deps = run_graph_deps(pending)
     order = bm.ec.env_order(table)
     refuse_inversions(pending, order, deps, tag_map)
-    # Before the padding, whose over-depth refusal is where this line helps most.
+    # Before `stage_outputs`, whose stage-count refusal is where this line helps most.
     print(ad.dag_shape_notice(deps))
-    per_level = wv.env_level_waves(pending, order, deps)
-    level_counts = [sum(map(len, w.values())) for w in per_level]
+    stages = wv.stage_outputs(order, deps, pending)
     print(
         f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-        f"envlevels={level_counts} empty={not any(level_counts)}"
+        f"stages={stages['counts']} empty={stages['empty']}"
     )
     write_outputs(
-        **wv.env_level_outputs(per_level),
+        cap_cells=len(pending),
+        **stages,
         warm=json.dumps(warm_rows(tag_map, table)),
         max_parallel=bm.ec.max_parallel(table),
     )

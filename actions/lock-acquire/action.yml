@@ -1,21 +1,12 @@
 name: shipmate lock-acquire
 description: >-
-  Lock every cell of the four env-level wave maps for the pull request through scripts/cell-lock,
+  Lock every cell of apply-detect's `cells` for the pull request through scripts/cell-lock,
   re-entering locks it already holds, then refuse unless the pull request stayed open while the
   locks were taken. A refusal releases the locks this run created. Mints its own App token with
   contents:write and pull-requests:read.
 inputs:
-  envlevel0-waves:
-    description: JSON wave0..wave7 map for env-level 0, from apply-detect.
-    required: true
-  envlevel1-waves:
-    description: JSON wave0..wave7 map for env-level 1, from apply-detect.
-    required: true
-  envlevel2-waves:
-    description: JSON wave0..wave7 map for env-level 2, from apply-detect.
-    required: true
-  envlevel3-waves:
-    description: JSON wave0..wave7 map for env-level 3, from apply-detect.
+  cells:
+    description: JSON list of `{stack, environment}`, apply-detect's `cells` output.
     required: true
   pr-number:
     description: The pull request the locks are taken for.
@@ -50,9 +41,6 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}
-        SHIPMATE_ENVLEVEL1_WAVES: ${{ inputs.envlevel1-waves }}
-        SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
-        SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
+        SHIPMATE_CELLS: ${{ inputs.cells }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" acquire

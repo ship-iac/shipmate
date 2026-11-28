@@ -277,31 +277,36 @@ def test_only_the_listed_steps_carry_the_variables():
 #: each by name, and an output the action stops declaring reads '' there. The comment's fields
 #: are no output: they travel in the `apply-report` artifact.
 _APPLY_DETECT_ACTION_OUTPUTS = {
-    "envlevel0_waves": {
+    "levels": {
         "description": (
-            "JSON wave0..wave7 map for env-level 0. A targeted apply puts every cell here."
+            "JSON list, one element per populated env-level in run order; each element is a JSON "
+            'string of that level\'s `{"L<i>-W<w>": [cell row, ...]}` stage map. A targeted apply '
+            "has one level."
         ),
-        "value": "${{ steps.d.outputs.envlevel0_waves }}",
+        "value": "${{ steps.d.outputs.levels }}",
     },
-    **{
-        f"envlevel{n}_waves": {
-            "description": f"JSON wave0..wave7 map for env-level {n}",
-            "value": f"${{{{ steps.d.outputs.envlevel{n}_waves }}}}",
-        }
-        for n in (1, 2, 3)
-    },
-    **{
-        f"envlevel{n}_empty": {
-            "description": f"'true' when env-level {n} has no cell in any wave.",
-            "value": f"${{{{ steps.d.outputs.envlevel{n}_empty }}}}",
-        }
-        for n in (0, 1, 2, 3)
-    },
-    "first_level": {
+    "stages": {
         "description": (
-            "The lowest env-level with a cell in any wave, '0' to '3'; empty when no level has one."
+            "JSON list in run order of `{key, n, level, first}`: the stage key, its run position, "
+            "its index into `levels`, and whether it is its level's first stage."
         ),
-        "value": "${{ steps.d.outputs.first_level }}",
+        "value": "${{ steps.d.outputs.stages }}",
+    },
+    "keys": {
+        "description": "JSON list of the stage keys in run order.",
+        "value": "${{ steps.d.outputs.keys }}",
+    },
+    "counts": {
+        "description": "JSON list of each stage's cell count in run order.",
+        "value": "${{ steps.d.outputs.counts }}",
+    },
+    "cells": {
+        "description": "JSON list of every cell's `{stack, environment}`, in run order.",
+        "value": "${{ steps.d.outputs.cells }}",
+    },
+    "empty": {
+        "description": "'true' when no stage has a cell.",
+        "value": "${{ steps.d.outputs.empty }}",
     },
     "head_sha": {
         "description": "The echoed head SHA.",
@@ -347,7 +352,7 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: add a `report` output to `actions/apply-detect/action.yml`; restore its
     `pusher` output; delete its `refusal` output; delete its `provenance_run` output; delete its
     `base_sha` output; restore `held_cells` in `base_sha`'s description; delete its
-    `refused_by_rule` output; delete its `first_level` output."""
+    `refused_by_rule` output; delete its `cells` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
 
 
