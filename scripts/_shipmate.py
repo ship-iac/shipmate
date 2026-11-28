@@ -409,6 +409,19 @@ def gh_json(path, run=None, *, retry=True):
 OUTPUT_CAP = 500_000
 
 
+def selected_stage(waves, key):
+    """`waves`, a stage map, when `key` is empty, else `{key: waves[key]}`; refuses a `key`
+    `waves` lacks. The one narrowing for a stage's pre-flight and snapshot."""
+    if not key:
+        return waves
+    if key not in waves:
+        raise SystemExit(
+            f"::error::stage `{key}` is none of the {len(waves)} stages in the wave matrices, "
+            "so it cannot be checked alone; refusing to apply."
+        )
+    return {key: waves[key]}
+
+
 def write_outputs(*, cap_cells=None, **pairs):
     """Append each `name=value` pair to the calling step's `GITHUB_OUTPUT`, a bool as
     `true`/`false`. A value holding CR or LF would end its line early. Lines end in LF on every

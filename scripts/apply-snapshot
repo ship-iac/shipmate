@@ -20,7 +20,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, decoded, is_pr_number, run_annotated, write_outputs
+from _shipmate import _load, decoded, is_pr_number, run_annotated, selected_stage, write_outputs
 
 ag = _load("apply-gate")
 
@@ -98,27 +98,15 @@ def by_wave(waves, snap):
     }
 
 
-def selected(waves, key):
-    """`waves` when `key` is empty, else `{key: waves[key]}`; refuses a `key` `waves` lacks."""
-    if not key:
-        return waves
-    if key not in waves:
-        raise SystemExit(
-            f"::error::stage `{key}` is none of the {len(waves)} stages in the wave matrices, "
-            "so it cannot be checked alone; refusing to apply."
-        )
-    return {key: waves[key]}
-
-
 def main():
     """Write output `by_wave` to `GITHUB_OUTPUT`, from `SHIPMATE_WAVES_JSON`,
     `SHIPMATE_APP_ID` (an empty one refuses first), the check runs on stdin, and
-    `SHIPMATE_STAGE_KEY`, which narrows the waves to one stage when set (`selected`)."""
+    `SHIPMATE_STAGE_KEY`, which narrows the waves to one stage when set (`selected_stage`)."""
     app_id = os.environ["SHIPMATE_APP_ID"]
     # Refuses an empty id before the waves or the listing are parsed, so a misconfiguration is
     # reported first.
     ag.from_app([], app_id)
-    waves = selected(
+    waves = selected_stage(
         json.loads(os.environ["SHIPMATE_WAVES_JSON"]), os.environ.get("SHIPMATE_STAGE_KEY", "")
     )
     snap = snapshot(waves, ag.parse_jsonl(sys.stdin), app_id)
