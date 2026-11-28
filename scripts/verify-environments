@@ -22,7 +22,7 @@ import json
 import os
 import sys
 
-from _shipmate import run_annotated
+from _shipmate import run_annotated, selected_stage
 
 
 def required_bindings(waves):
@@ -77,7 +77,7 @@ def main():
             f"::error::the wave matrices did not parse as JSON ({exc}), so no "
             "environment could be checked; refusing to apply."
         ) from exc
-    bindings = required_bindings(waves)
+    bindings = required_bindings(selected_stage(waves, os.environ.get("SHIPMATE_STAGE_KEY", "")))
     existing = existing_names(json.load(sys.stdin))
     missing = [b for b in bindings if b not in existing]
     if missing:

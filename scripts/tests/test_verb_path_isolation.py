@@ -10,7 +10,7 @@ Pinned on the apply side:
 - its `workflow_call` inputs, whole, in both files. The retired `mode` rail coming back is the
   regression, and an absence nothing compares is fail-open by construction;
 - its job ids, whole, in both files, and that no step anywhere in either calls `unlock-cell`;
-- each `envlevel*` job's `if:`, which must carry no verb clause;
+- the `waves` job's `if:`, which must carry no verb clause;
 - every `summary` action step running unconditionally: an `if:` there was only ever the unlock
   skip.
 
@@ -30,7 +30,7 @@ Pinned on the unlock side:
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
   that env. The apply path gets this refusal from apply-run's `lock` job for the first populated
-  env-level and from apply-env-level's `snapshot` job for the others.
+  env-level and from each later level's first `entry` job in `stage.yml` for the others.
 - `detect`'s and `unlock`'s `permissions`, whole, keyed by job id. The consumer's `unlock` job
   grants `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the
   pull request's HCL.
@@ -84,10 +84,7 @@ APPLY_JOBS = {
         "waiters",
         "detect",
         "lock",
-        "envlevel0",
-        "envlevel1",
-        "envlevel2",
-        "envlevel3",
+        "waves",
         "unflip",
         "summary",
     },
@@ -145,30 +142,16 @@ APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
 #: Every workflow each verb's file reaches through the `uses:` of its jobs, whole: `apply.yml`
 #: reaches `apply-cell` only through this chain, and `unlock.yml` reaches no workflow at all.
 REACHED_WORKFLOWS = {
-    APPLY: ["apply-run.yml", "apply-env-level.yml", "cell.yml"],
+    APPLY: ["apply-run.yml", "waves.yml", "stage.yml", "cell.yml"],
     UNLOCK: [],
 }
 
-#: The whole `if:` of each `envlevel*` job. The mode clause went with the input, and it must not
-#: come back as a verb clause either. `lock` skipped, as for a `taken` run, stops every level.
-ENVLEVEL_IF = {
-    "envlevel0": (
-        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
-    ),
-    "envlevel1": (
-        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
-    ),
-    "envlevel2": (
-        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
-    ),
-    "envlevel3": (
-        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true'"
-        " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
-    ),
-}
+#: The whole `if:` of `waves`. The mode clause went with the input, and it must not come back as a
+#: verb clause either. `lock` skipped, as for a `taken` run, stops every stage.
+WAVES_IF = (
+    "${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true'"
+    " && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}"
+)
 
 #: The whole `if:` of the unlock job. `guard` is in its `needs` too, so a rejected dispatch
 #: reaches `!failure()` here instead of leaving `detect` skipped, whose outputs read as empty
@@ -258,15 +241,15 @@ def test_the_apply_workflow_can_release_no_lock():
         )
 
 
-def test_each_envlevel_job_runs_on_every_apply_dispatch():
-    """Each level's whole `if:`, the cancel guard included: without it a level runs after a
-    cancelled predecessor and applies out of `needs` order.
+def test_the_waves_job_runs_on_every_apply_dispatch():
+    """The whole `if:`, the cancel guard included: without it the stages run after a cancelled
+    `lock`.
 
-    Mutations: drop the cancel guard from `envlevel2`'s `if:` -- red; drop
+    Mutations: drop the cancel guard from `waves`' `if:` -- red; drop
     `needs.lock.result == 'success'` from it -- red."""
-    got = {job_id: _job(APPLY_RUN, job_id).get("if") for job_id in ENVLEVEL_IF}
-    assert got == ENVLEVEL_IF, (
-        f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "
+    got = _job(APPLY_RUN, "waves").get("if")
+    assert got == WAVES_IF, (
+        f"the waves job's `if:` is {got!r}, not {WAVES_IF!r} -- a verb clause here "
         "would be a second place deciding what this file does, and the file already decided"
     )
 
@@ -329,10 +312,10 @@ def test_the_unlock_workflow_applies_nothing():
 
 @pytest.mark.parametrize("workflow", sorted(REACHED_WORKFLOWS))
 def test_each_verb_reaches_exactly_these_workflows(workflow):
-    """`apply.yml` reaches `apply-cell` through `apply-run.yml`, `apply-env-level.yml` and
-    `cell.yml`; `unlock.yml` calls no workflow, so neither the wave engine nor the cell that
+    """`apply.yml` reaches `apply-cell` through `apply-run.yml`, `waves.yml`, `stage.yml` and
+    `cell.yml`; `unlock.yml` calls no workflow, so neither the stage engine nor the cell that
     applies. Mutations: point `unlock.yml`'s `unlock` job at `./.github/workflows/cell.yml`;
-    point `apply-env-level.yml`'s `wave3` at `./.github/workflows/unlock.yml`; point
+    point `stage.yml`'s `cell` at `./.github/workflows/unlock.yml`; point
     `cell.yml`'s `Apply the cell` step at `$/actions/plan-cell`."""
     workflows, actions = _reached(workflow)
     assert workflows == REACHED_WORKFLOWS[workflow]
@@ -402,11 +385,11 @@ def test_the_unlock_job_references_exactly_these_secrets():
     assert secrets_refs(_job(UNLOCK, "unlock")) == ["secrets.SHIPMATE_SECRETS"]
 
 
-@pytest.mark.parametrize("workflow", ["plan.yml", "apply-env-level.yml", UNLOCK])
+@pytest.mark.parametrize("workflow", ["plan.yml", "waves.yml", "stage.yml", UNLOCK])
 def test_no_workflow_level_value_hands_a_secret_to_every_job(workflow):
     """A workflow-level `env:` reaches every job, the cells that run the pull request's HCL
     included, so the per-job secret pins would not see it. Mutation: add a top-level
-    `env: { K: "${{ secrets.SHIPMATE_VARS }}" }` to `apply-env-level.yml`."""
+    `env: { K: "${{ secrets.SHIPMATE_VARS }}" }` to `stage.yml`."""
     wf = workflow_yaml(workflow)
     assert secrets_refs({k: v for k, v in wf.items() if k not in ("on", True, "jobs")}) == []
 

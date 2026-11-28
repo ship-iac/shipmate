@@ -33,8 +33,8 @@ ARABIC_INDIC_12 = chr(0x661) + chr(0x662)
 #: Two cells whose names differ only in case, in two waves: GitHub's expression lookups ignore
 #: case, and `toJSON(fromJSON(x))` merges such keys.
 BY_WAVE = {
-    "wave0": {"apply / dev-eu / stacks/App": [11, 12], "apply / dev-eu / stacks/dns": [5]},
-    "wave1": {"apply / dev-eu / stacks/app": [21]},
+    "L0-W0": {"apply / dev-eu / stacks/App": [11, 12], "apply / dev-eu / stacks/dns": [5]},
+    "L0-W1": {"apply / dev-eu / stacks/app": [21]},
 }
 
 
@@ -70,7 +70,7 @@ def test_own_prints_one_success_entry_per_id_linked_to_the_apply_job(capsys):
 
 def test_own_matches_the_cell_by_exact_name_in_any_wave(capsys):
     """`stacks/App` and `stacks/app` each get only their own ids. Mutations: compare names
-    case-folded (both cells match twice and refuse); search `wave0` alone (`stacks/app` is
+    case-folded (both cells match twice and refuse); search `L0-W0` alone (`stacks/app` is
     not found)."""
     found = {s: [e["id"] for e in _own(capsys, s)] for s in ("stacks/App", "stacks/app")}
     assert found == {"stacks/App": [11, 12], "stacks/app": [21]}
@@ -78,7 +78,7 @@ def test_own_matches_the_cell_by_exact_name_in_any_wave(capsys):
 
 @pytest.mark.parametrize(
     ("by_wave", "count"),
-    [({"wave0": {}}, 0), ({"wave0": {APP: [1]}, "wave1": {APP: [2]}}, 2)],
+    [({"L0-W0": {}}, 0), ({"L0-W0": {APP: [1]}, "L0-W1": {APP: [2]}}, 2)],
     ids=["absent", "in-two-waves"],
 )
 def test_own_refuses_a_cell_in_no_wave_or_in_two(capsys, by_wave, count):
@@ -100,7 +100,7 @@ def test_own_refuses_a_by_wave_that_is_no_object(capsys, by_wave):
 def test_own_refuses_ids_that_are_not_a_non_empty_list_of_ids(capsys, ids):
     """Mutations: drop the `ids and` clause (`[]` writes nothing and passes); drop `i > 0`
     (`[0]` passes)."""
-    assert _refusal(capsys, json.dumps({"wave0": {APP: ids}})) == (
+    assert _refusal(capsys, json.dumps({"L0-W0": {APP: ids}})) == (
         f"::error::the apply-check ids of {APP} are not a non-empty list of ids"
     )
 
@@ -270,13 +270,13 @@ def test_the_action_steps_fail_on_refused_ids_and_on_a_failed_write(tmp_path):
     }
     decide, write = STEPS[1]["run"], STEPS[3]["run"]
     cell = {**env, "STACK": "stacks/app", "ENV_NAME": "dev-eu", "APPLY_JOB_ID": JOB}
-    refused, _ = run_with_gh_recorder(tmp_path, decide, {**cell, "BY_WAVE": '{"wave0": {}}'})
+    refused, _ = run_with_gh_recorder(tmp_path, decide, {**cell, "BY_WAVE": '{"L0-W0": {}}'})
     assert (refused.returncode, refused.stderr.strip()) == (
         1,
         f"::error::{APP} is listed in 0 waves of by_wave, not one",
     )
     decided, _ = run_with_gh_recorder(
-        tmp_path, decide, {**cell, "BY_WAVE": json.dumps({"wave0": {APP: [11]}})}
+        tmp_path, decide, {**cell, "BY_WAVE": json.dumps({"L0-W0": {APP: [11]}})}
     )
     assert decided.returncode == 0, decided.stderr
     failed, calls = run_with_gh_recorder(tmp_path, write, env, write_rc=1, write_stderr="boom")

@@ -82,14 +82,14 @@ def _is_review(job):
 
 def _cell_part(job):
     """`"apply"` or `"save"` when `job` is that job of a cell of the call, exactly
-    `<caller> / run / L<n> / <env> / <stack> / <part>`, six segments; else None. A caller job
-    name containing ` / ` never matches, so such a run is kept."""
+    `<caller> / run / waves / <stage> / <env> / <stack> / <part>`, seven segments; else None. A
+    caller job name containing ` / ` never matches, so such a run is kept."""
     segments = _segments(job)
-    if len(segments) != 6 or segments[1] != "run":
+    if len(segments) != 7 or segments[1:3] != ["run", "waves"]:
         return None
-    # The env and stack come from the name itself, so this checks only the `L<n>` segment and
+    # The env and stack come from the name itself, so this checks only the stage segment and
     # the part, through the grammar's one owner.
-    return ag.cell_part(job["name"], segments[4], segments[3])
+    return ag.cell_part(job["name"], segments[5], segments[4])
 
 
 def _in_group_wait(jobs):

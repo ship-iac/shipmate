@@ -257,7 +257,7 @@ def _refusal(tmp_path, monkeypatch, **kw):
 
 
 def _applied(parsed):
-    return sorted((c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed))
+    return sorted((c["stack"], c["environment"]) for c in wave_cells(parsed))
 
 
 def test_only_the_auto_environments_pending_cells_apply(tmp_path, monkeypatch):
@@ -806,7 +806,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     ]
     assert parsed["base_sha"] == BASE
     assert (
-        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
+        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 stages=[1] "
         "excluded_targeted=[] skipped_after_targeted=['prod'] review_held=[] waiting=0 locked=0 "
         "overlap=2 attempted=0 applied_exempt=[] review_decision='NONE'"
     ) in capsys.readouterr().out.splitlines()
@@ -1584,7 +1584,7 @@ def test_a_duplicate_auto_run_after_an_ended_one_applies_neither_attempted_cell(
     ]
     assert detect_report()["waiting_cells"] == []
     assert (
-        f"::notice title=apply-all-detect::head={HEAD} cells=2 pending=2 envlevels=[0, 0, 0, 0] "
+        f"::notice title=apply-all-detect::head={HEAD} cells=2 pending=2 stages=[] "
         "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
         "overlap=0 attempted=2 applied_exempt=[] review_decision='NONE'"
     ) in capsys.readouterr().out.splitlines()

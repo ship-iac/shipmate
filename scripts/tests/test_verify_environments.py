@@ -25,8 +25,8 @@ vf = load_script("verify-environments")
 
 
 WAVES = {
-    "wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
-    "wave1": [],
+    "L0-W0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
+    "L0-W1": [],
 }
 
 
@@ -50,19 +50,19 @@ def test_bindings_are_the_distinct_env_bindings_detect_resolved():
     """`prod` is a shared environment, so its binding is the bare name; the script must take
     that from the cell, not recompute `<env>-apply`."""
     waves = {
-        "wave0": [
+        "L0-W0": [
             {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
             {"stack": "b", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
         ],
-        "wave1": [{"stack": "a", "environment": "prod", "env_binding": "prod"}],
-        "wave2": None,
+        "L0-W1": [{"stack": "a", "environment": "prod", "env_binding": "prod"}],
+        "L0-W2": None,
     }
     assert vf.required_bindings(waves) == ["dev-eu-apply", "prod"]
 
 
 def test_a_payload_with_no_cell_is_refused_rather_than_passed():
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [], "wave1": None})
+        vf.required_bindings({"L0-W0": [], "L0-W1": None})
     assert "no cell" in str(exc.value)
 
 
@@ -73,7 +73,7 @@ def test_a_cell_without_an_env_binding_is_refused_as_a_malformed_hand_off():
     Mutation: read `cell.get("env_binding", f"{cell['environment']}-apply")` -- no refusal.
     """
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [{"stack": "a", "environment": "dev-eu"}]})
+        vf.required_bindings({"L0-W0": [{"stack": "a", "environment": "dev-eu"}]})
     assert str(exc.value) == (
         "::error::a wave matrix cell carries no 'env_binding' key, so the environment it "
         "would bind could not be checked; this is a malformed hand-off rather than "
@@ -107,7 +107,7 @@ def test_a_complete_listing_yields_each_name_with_its_policy():
     }
 
 
-def _run_step(tmp_path, listing, waves_json, gh_exit=0):
+def _run_step(tmp_path, listing, waves_json, gh_exit=0, key=""):
     stub = (
         "gh() { "
         f'[ "{gh_exit}" = 0 ] || return {gh_exit}; '
@@ -128,6 +128,7 @@ def _run_step(tmp_path, listing, waves_json, gh_exit=0):
             "GITHUB_OUTPUT": str(tmp_path / "github_output"),
             "FAKE_LISTING": json.dumps(listing),
             "SHIPMATE_WAVES_JSON": waves_json,
+            "SHIPMATE_STAGE_KEY": key,
             "PYTHON": sys.executable,
             # The refusals carry an em dash; pinned both ends so the host locale cannot garble it.
             "PYTHONIOENCODING": "utf-8",
@@ -174,7 +175,7 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
     text is also the step's `refusal` output, which `lock` folds into its own. Mutation: drop
     `refusal_output=True` from the script's `run_annotated` -> no output written."""
     waves = {
-        "wave0": [
+        "L0-W0": [
             {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
             {"stack": "b", "environment": "prod", "env_binding": "prod-apply"},
         ]
@@ -223,7 +224,7 @@ def test_unparseable_waves_json_fails_the_run(tmp_path):
 def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
     # The other half of the branch: with dev-eu shared, `dev-eu-apply` need not exist and
     # `dev-eu` must.
-    waves = {"wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
+    waves = {"L0-W0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
     proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(waves))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
@@ -236,7 +237,7 @@ NO_POLICY_REASON = (
     "default branch, or set the policy in the environment's settings.\n"
 )
 POLICY_WAVES = {
-    "wave0": [
+    "L0-W0": [
         {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
         {"stack": "b", "environment": "prod", "env_binding": "prod"},
         {"stack": "c", "environment": "stg", "env_binding": "stg-apply"},
@@ -306,3 +307,62 @@ def test_the_action_declares_exactly_the_refusal_output():
             "value": "${{ steps.verify.outputs.refusal }}",
         }
     }
+
+
+#: `L0-W0` binds an existing environment; `L0-W1` binds `prod-apply`, which does not exist.
+STAGES = {
+    "L0-W0": [{"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
+    "L0-W1": [{"stack": "b", "environment": "prod", "env_binding": "prod-apply"}],
+}
+
+
+@bash_only
+def test_a_stage_key_verifies_only_that_stage(tmp_path):
+    """Mutation: ignore `SHIPMATE_STAGE_KEY` and verify the whole map -- `prod-apply` refuses,
+    red."""
+    proc = _run_step(tmp_path, _listing(["dev-eu-apply"]), json.dumps(STAGES), key="L0-W0")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stdout == "::notice::apply-path environments verified: dev-eu-apply\n"
+
+
+@bash_only
+def test_a_stage_key_refuses_its_own_missing_environment(tmp_path):
+    """Mutation: select the first stage whatever the key -- passes, red."""
+    proc = _run_step(tmp_path, _listing(["dev-eu-apply"]), json.dumps(STAGES), key="L0-W1")
+    assert proc.returncode == 1, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stderr == (
+        "::error::this apply would bind GitHub Environment(s) that do not exist: prod-apply. "
+        "GitHub creates a missing environment on demand with no reviewers, no wait timer and "
+        "no deployment branch policy, so the apply would run outside every control that "
+        "environment is meant to carry. Two ways to fix it: create each environment named "
+        "above, or correct the environment's entry in `.github/shipmate-config.yml` so the "
+        "apply binds the environments you did create (`split: false` binds the bare <env>, "
+        "anything else binds <env>-apply).\n"
+    )
+
+
+@bash_only
+def test_a_stage_key_the_map_lacks_refuses(tmp_path):
+    """Every binding exists, so only the key refusal fails the step. Mutation: fall back to the
+    whole map for a key it lacks -- passes, red."""
+    listing = _listing(["dev-eu-apply", "prod-apply"])
+    proc = _run_step(tmp_path, listing, json.dumps(STAGES), key="L0-W9")
+    assert proc.returncode == 1, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stderr == (
+        "::error::stage `L0-W9` is none of the 2 stages in the wave matrices, so it cannot be "
+        "checked alone; refusing to apply.\n"
+    )
+
+
+def test_the_key_input_reaches_the_script():
+    """Mutation: rename the step's `SHIPMATE_STAGE_KEY` env -- red."""
+    assert action_yaml("verify-environments")["inputs"]["key"] == {
+        "description": (
+            "One stage key of `waves-json` to verify alone; empty verifies every stage. A key "
+            "the map lacks refuses."
+        ),
+        "required": False,
+        "default": "",
+    }
+    step = next(s for s in action_steps("verify-environments") if s.get("id") == "verify")
+    assert step["env"]["SHIPMATE_STAGE_KEY"] == "${{ inputs.key }}"

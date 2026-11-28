@@ -32,6 +32,7 @@ import sys
 
 from _shipmate import (
     _load,
+    cell_names,
     cell_summaries,
     command_data,
     current_run_url,
@@ -49,7 +50,6 @@ ag = _load("apply-gate")
 # COUPLING: the only parser of tofu's lock output in the engine, shared with
 # actions/unlock-cell so the note and the unlock can never name different locks.
 li = _load("lock-info")
-wv = _load("waves")
 
 CELL_KEYS = {"stack": str, "environment": str, "result": str, "reason": str}
 _RESULTS = frozenset({"applied", "failed", "blocked"})
@@ -309,18 +309,18 @@ def load_cells(cells_dir):
 
 
 def _expected_cells():
-    """Union of every wave array in the SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (a
-    targeted apply fills level 0 alone); '' contributes nothing. Cell identity is
-    (environment, stack) -- a wave element is
-    `{"stack": "<stack path>", "environment": "<env>"}`."""
-    raws = (os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") for i in range(wv.MAX_ENV_LEVELS))
-    return {
-        (item["environment"], item["stack"])
-        for raw in raws
-        if raw
-        for cells in json.loads(raw).values()
-        for item in cells
-    }
+    """The (environment, stack) of every cell in `SHIPMATE_CELLS`, the detect's `cells` output.
+    Empty or absent reads as no cell, so a failed detect still gets its refusal reply; anything
+    else that is not a list of `{stack, environment}` objects refuses."""
+    raw = os.environ.get("SHIPMATE_CELLS", "")
+    if not raw:
+        return set()
+    cells = cell_names(raw)
+    if cells is None:
+        raise SystemExit(
+            "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+        )
+    return {(c["environment"], c["stack"]) for c in cells}
 
 
 def build_rows(expected, downloaded):
@@ -392,7 +392,7 @@ def apply_check_state(rows, present, done, held):
     The pending apply checks ARE the work queue, so they -- not the per-cell
     artifact -- are the authority on whether a unit is done. `Compose cell
     summary` runs `if: always()`, and a check is completed (by the cell's `save` job,
-    else the level's `complete` job) only for a cell whose `apply` job and `save` state
+    else the stage's `complete` job) only for a cell whose `apply` job and `save` state
     step succeeded, so an `applied` artifact can coexist with a pending check (both
     writes failed, or a newer plan re-created the check); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
@@ -460,7 +460,7 @@ def _cell_line(row, url, env=None):
 
 def _job_url(row, jobs, run_url, part="apply"):
     """Per-cell log link: the row's cell job `part` (`apply` or `save`), the job
-    `apply-gate.cell_part` matches by its `L<n> / <env> / <stack> / <part>` name. No match ->
+    `apply-gate.cell_part` matches by its `<stage> / <env> / <stack> / <part>` name. No match ->
     the workflow-run URL."""
     url = None
     for job in jobs:

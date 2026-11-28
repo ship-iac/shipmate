@@ -207,17 +207,17 @@ def test_unlock_refuses_a_queue_above_the_matrix_limit(monkeypatch, tmp_path):
 
 
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
-    """unlock.yml's matrix reads `cells` alone; a wave output here would be an apply matrix
+    """unlock.yml's matrix reads `cells` alone; a stage output here would be an apply matrix
     with nothing reading it.
 
-    Mutation: write an `envlevel0_waves=` line from `main` -- the filter reddens."""
+    Mutation: write a `levels=` line from `main` -- the filter reddens."""
     out = _unlock_env(monkeypatch, tmp_path)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ud.main()
     parsed = github_outputs(out)
     assert len(json.loads(parsed["cells"])) == 3  # Not vacuous: there is a queue.
-    wave_keys = [k for k in parsed if "waves" in k or "empty" in k]
-    assert wave_keys == []
+    stage_keys = [k for k in parsed if k in {"levels", "stages", "keys", "counts", "empty"}]
+    assert stage_keys == []
 
 
 def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):

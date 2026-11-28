@@ -36,7 +36,7 @@ on:
       # `summary` is left out: it can end `cancelled` with no run cancel, for example at a full
       # gate-writer queue. Empty: the call ended before any job ran.
       run_cancelled:
-        value: ${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || jobs.lock.result == 'cancelled' || jobs.envlevel0.result == 'cancelled' || jobs.envlevel1.result == 'cancelled' || jobs.envlevel2.result == 'cancelled' || jobs.envlevel3.result == 'cancelled' }}
+        value: ${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || jobs.lock.result == 'cancelled' || jobs.waves.result == 'cancelled' }}
 # One apply run per pull request at a time; a later one waits rather than cancels. `apply.yml`'s
 # `run` refuses a `pr_number` that is not canonical before it keys this group.
 concurrency:
@@ -164,22 +164,19 @@ jobs:
 
   detect:
     # No `needs`: it reads the pull request itself, beside `review`, and `lock` refuses unless
-    # both read the same decision. A failed `review` stops `lock` and the levels, not this job.
+    # both read the same decision. A failed `review` stops `lock` and `waves`, not this job.
     runs-on: ${{ inputs.runs_on }}
     # It checks out the pull request's tree, so it restores and never saves.
     cache-mode: read
     permissions: { contents: read, checks: read, actions: read, pull-requests: read }
-    # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
+    # An unwritten `empty` reads '', runs `waves` and dies at fromJSON.
     outputs:
-      envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
-      envlevel1_waves: ${{ steps.d.outputs.envlevel1_waves }}
-      envlevel2_waves: ${{ steps.d.outputs.envlevel2_waves }}
-      envlevel3_waves: ${{ steps.d.outputs.envlevel3_waves }}
-      envlevel0_empty: ${{ steps.d.outputs.envlevel0_empty }}
-      envlevel1_empty: ${{ steps.d.outputs.envlevel1_empty }}
-      envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
-      envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
-      first_level: ${{ steps.d.outputs.first_level }}
+      levels: ${{ steps.d.outputs.levels }}
+      stages: ${{ steps.d.outputs.stages }}
+      keys: ${{ steps.d.outputs.keys }}
+      counts: ${{ steps.d.outputs.counts }}
+      cells: ${{ steps.d.outputs.cells }}
+      empty: ${{ steps.d.outputs.empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
@@ -243,9 +240,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Locks every cell the waves apply, then runs the first populated level's pre-flight, snapshot
-  # and wave0 release. A cell another pull request took after `detect` read the locks refuses the
-  # run; a new `shipmate apply` recomputes.
+  # Locks every cell the run applies, then runs the first level's pre-flight and snapshot and
+  # releases its first stage. A cell another pull request took after `detect` read the locks
+  # refuses the run; a new `shipmate apply` recomputes.
   lock:
     needs: [review, detect]
     if: ${{ !failure() && !cancelled() && needs.review.outputs.admitted == 'true' }}
@@ -280,49 +277,48 @@ jobs:
       - id: l
         uses: $/actions/lock-acquire
         with:
-          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
-          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
-          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
-          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          cells: ${{ needs.detect.outputs.cells }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Before the release, while a missing or unprotected environment can still refuse the run.
       - id: verify
-        if: ${{ needs.detect.outputs.first_level != '' }}
+        if: ${{ needs.detect.outputs.empty != 'true' }}
         uses: $/actions/verify-environments
         with:
-          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+          waves-json: ${{ fromJSON(needs.detect.outputs.levels)[0] }}
       - id: snap
-        if: ${{ needs.detect.outputs.first_level != '' }}
+        if: ${{ needs.detect.outputs.empty != 'true' }}
         uses: $/actions/apply-snapshot
         with:
           head-sha: ${{ needs.detect.outputs.head_sha }}
-          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+          waves-json: ${{ fromJSON(needs.detect.outputs.levels)[0] }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      - if: ${{ needs.detect.outputs.first_level != '' }}
+      - if: ${{ needs.detect.outputs.empty != 'true' }}
         uses: $/actions/apply-release
         with:
-          snapshot: ${{ toJSON(fromJSON(steps.snap.outputs.by_wave).wave0) }}
+          mode: release
+          by-wave: ${{ steps.snap.outputs.by_wave }}
+          key: ${{ fromJSON(needs.detect.outputs.keys)[0] }}
           deploy: false
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
-  envlevel0:
-    # `apply-gate.cell_part` matches a cell job as `L<n> / <env> / <stack> / apply` or `/ save`, so
-    # this `L<n>` name is load-bearing: renaming it strands apply checks pending. deploy.yml
-    # repeats it.
-    name: L0
-    # `review` is listed so its failure reaches `!failure()`: `detect` runs beside it and can
-    # succeed after `review` failed.
+  waves:
+    # `review` is listed so its failure reaches `!failure()`: `detect` can succeed beside it.
+    # No `name:`: `apply-queue._cell_part` and `unflip` read the job id `waves` in job names
+    # (`test_every_stage_job_is_named_for_the_cell_job_grammar`).
     needs: [review, detect, lock]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
-    uses: ./.github/workflows/apply-env-level.yml
-    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
+    uses: ./.github/workflows/waves.yml
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
     with:
-      waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
+      stages: ${{ needs.detect.outputs.stages }}
+      levels: ${{ needs.detect.outputs.levels }}
+      keys: ${{ needs.detect.outputs.keys }}
+      counts: ${{ needs.detect.outputs.counts }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       tools: ${{ needs.detect.outputs.tools }}
@@ -330,78 +326,24 @@ jobs:
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
       base_sha: ${{ needs.detect.outputs.base_sha }}
-      by_wave: ${{ needs.detect.outputs.first_level == '0' && needs.lock.outputs.by_wave || '' }}
+      by_wave: ${{ needs.lock.outputs.by_wave }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
-    # consumer's `complete` job and cells' `save` jobs would hold no key, its applies would
+    # consumer's `complete` jobs and cells' `save` jobs would hold no key, its applies would
     # execute, and their apply checks would strand pending forever.
-    secrets: &envlevel-secrets
-      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
+    secrets:
+      # Declare a new secret in waves.yml and stage.yml in the same change that maps it here: a
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
       # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
-  envlevel1:
-    name: L1
-    needs: [review, detect, lock, envlevel0]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
-    uses: ./.github/workflows/apply-env-level.yml
-    permissions: *envlevel-permissions
-    with:
-      waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
-      head_sha: ${{ needs.detect.outputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ needs.detect.outputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ needs.detect.outputs.provenance_run }}
-      base_sha: ${{ needs.detect.outputs.base_sha }}
-      by_wave: ${{ needs.detect.outputs.first_level == '1' && needs.lock.outputs.by_wave || '' }}
-    secrets: *envlevel-secrets
-
-  envlevel2:
-    name: L2
-    needs: [review, detect, lock, envlevel0, envlevel1]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
-    uses: ./.github/workflows/apply-env-level.yml
-    permissions: *envlevel-permissions
-    with:
-      waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
-      head_sha: ${{ needs.detect.outputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ needs.detect.outputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ needs.detect.outputs.provenance_run }}
-      base_sha: ${{ needs.detect.outputs.base_sha }}
-      by_wave: ${{ needs.detect.outputs.first_level == '2' && needs.lock.outputs.by_wave || '' }}
-    secrets: *envlevel-secrets
-
-  envlevel3:
-    name: L3
-    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') && needs.lock.result == 'success' }}
-    uses: ./.github/workflows/apply-env-level.yml
-    permissions: *envlevel-permissions
-    with:
-      waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
-      head_sha: ${{ needs.detect.outputs.head_sha }}
-      runs_on: ${{ inputs.runs_on }}
-      tools: ${{ needs.detect.outputs.tools }}
-      pr_number: ${{ inputs.pr_number }}
-      auto: ${{ inputs.auto }}
-      provenance_run: ${{ needs.detect.outputs.provenance_run }}
-      base_sha: ${{ needs.detect.outputs.base_sha }}
-      by_wave: ${{ needs.detect.outputs.first_level == '3' && needs.lock.outputs.by_wave || '' }}
-    secrets: *envlevel-secrets
-
-  # `lock` released the first level's wave0, or its runner was lost, and that level's call never
-  # started, so no `complete` of it runs: this returns those checks to `queued`. Every refusal
-  # `lock` records before the release keeps it off.
+  # `lock` released the first stage, or its runner was lost, and `waves` did not succeed: when
+  # that stage's own `complete` did not succeed and was not skipped, this classifies its cells
+  # from their rows. Every refusal `lock` records before the release keeps it off.
   unflip:
-    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
-    if: ${{ always() && needs.detect.outputs.first_level != '' && (needs.detect.outputs.first_level == '0' && needs.envlevel0.result || needs.detect.outputs.first_level == '1' && needs.envlevel1.result || needs.detect.outputs.first_level == '2' && needs.envlevel2.result || needs.detect.outputs.first_level == '3' && needs.envlevel3.result || '') == 'skipped' && needs.lock.result != 'skipped' && needs.lock.outputs.refusal == '' }}
+    needs: [review, detect, lock, waves]
+    if: ${{ always() && needs.detect.outputs.empty != 'true' && needs.waves.result != 'success' && needs.lock.result != 'skipped' && needs.lock.outputs.refusal == '' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: { actions: read, checks: read }
@@ -413,14 +355,15 @@ jobs:
         uses: $/actions/apply-snapshot
         with:
           head-sha: ${{ needs.detect.outputs.head_sha }}
-          waves-json: ${{ needs.detect.outputs.first_level == '0' && needs.detect.outputs.envlevel0_waves || needs.detect.outputs.first_level == '1' && needs.detect.outputs.envlevel1_waves || needs.detect.outputs.first_level == '2' && needs.detect.outputs.envlevel2_waves || needs.detect.outputs.first_level == '3' && needs.detect.outputs.envlevel3_waves || '' }}
+          waves-json: ${{ fromJSON(needs.detect.outputs.levels)[0] }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           counted: "true"
       - uses: $/actions/apply-complete
         with:
+          mode: unflip
+          first-key: ${{ fromJSON(needs.detect.outputs.keys)[0] }}
           by-wave: ${{ needs.lock.outputs.by_wave || steps.resnap.outputs.by_wave }}
-          wave-results: '{"wave0": "skipped"}'
           job-id: ${{ job.check_run_id }}
           deploy: false
           pr-number: ${{ inputs.pr_number }}
@@ -428,7 +371,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   summary:
-    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3, unflip]
+    needs: [review, detect, lock, waves, unflip]
     # No summary result comment and no gate write when a `pr_number` review reads as missing or not
     # open, an `auto` run is refused at review (both red runs), or the claim reads `taken`. Keyed on
     # `review`: a `detect` failure after a bound review gets both, like a failed or cancelled apply.
@@ -440,7 +383,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     # Every step mints the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
-    # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
+    # stage.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
     environment: { name: shipmate-engine, deployment: false }
     # gate-refresh and apply-summary mint their own App tokens for their scans and writes; the one
@@ -490,10 +433,7 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
           environment: ${{ inputs.environment }}
-          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
-          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
-          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
-          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          cells: ${{ needs.detect.outputs.cells }}
           detect-result: ${{ needs.detect.result }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}

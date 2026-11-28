@@ -94,11 +94,10 @@ def _render(monkeypatch, tmp_path, name, report_env, report=None):
         (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     checks = tmp_path / "checks.jsonl"
     checks.write_text("", encoding="utf-8")
-    waves = {"wave0": [{"stack": s, "environment": e} for s, e in applied]}
     env = {
         "CELLS": str(cells),
         "SHIPMATE_ENVIRONMENT": "",
-        "SHIPMATE_ENVLEVEL0_WAVES": json.dumps(waves),
+        "SHIPMATE_CELLS": json.dumps([{"stack": s, "environment": e} for s, e in applied]),
         "SHIPMATE_RESULTS": "success",
         "SHIPMATE_DETECT_RESULT": "success",
         "SHIPMATE_CHECKS": str(checks),

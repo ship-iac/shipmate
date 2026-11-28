@@ -10,8 +10,8 @@ Both forms source the work set from the head's own apply checks: a stack
 belongs to this run when `apply / <env> / <path>` is among the App-authored
 checks on the head, and the plan run it applies from is the one that check
 records. Cells whose apply check already completed are dropped (idempotent
-no-op), and the rest wave-ordered. Both write the env-level output contract
-deploy-detect writes (`waves.env_level_outputs`), and the apply result comment's fields to a
+no-op), and the rest wave-ordered. Both write the stage output contract
+deploy-detect writes (`waves.stage_outputs`), and the apply result comment's fields to a
 report file (`write_report`).
 
 An empty `SHIPMATE_ENV` selects the bare form, `bare_main`: every environment's
@@ -32,8 +32,8 @@ base (`refuse_behind`). Every form refuses it when another run holds the apply c
 it would apply `in_progress` and may still apply that cell, or may have (`refuse_held`).
 
 A named environment selects the targeted form, scoped to that ONE environment.
-It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
-which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that runs
+It does not order by `needs`: it passes `waves.stage_outputs` an empty order,
+which puts every cell at env-level 0. A cell that runs
 after a cell pending in another environment waits (`waves.waiting_cells`): it stays
 pending, `waiting_cells` names it, and the rest apply. A cell another pull request
 holds a cell lock on stays pending the same way, named in `held_cells` (both forms),
@@ -975,7 +975,7 @@ def refuse_behind(repo, pr_number, selected, lines, app_id, stacks):
 
 
 def bare_main(auto=False):
-    """The bare `shipmate apply` work set -> env-levels -> waves.
+    """The bare `shipmate apply` work set -> env-levels -> stages.
 
     The pre-merge equivalent of deploy-detect, sourced like the targeted form:
     cells are the tree's stacks whose `apply / <env> / <stack>` check is on the
@@ -1150,15 +1150,14 @@ def bare_main(auto=False):
         }
     )
 
-    # Before the padding, whose over-depth refusal is where this line helps most.
+    # Before `stage_outputs`, whose stage-count refusal is where this line helps most.
     print(dag_shape_notice(deps))
-    per_level = wv.env_level_waves(runnable, order, deps)
-    level_counts = [sum(map(len, w.values())) for w in per_level]
+    stages = wv.stage_outputs(order, deps, runnable)
     # The title is what `apply-comment`'s held-env remedy and CONTRACT.md tell reviewers to
     # read; rename all three together.
     print(
         f"::notice title=apply-all-detect::head={head} "
-        f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
+        f"cells={len(cells)} pending={len(pending)} stages={stages['counts']} "
         f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
         f"review_held={held} waiting={len(waiting)} locked={len(locked)} overlap={len(overlap)} "
         f"attempted={len(attempted)} applied_exempt={applied_exempt} "
@@ -1166,6 +1165,8 @@ def bare_main(auto=False):
         # from a CHANGES_REQUESTED one.
         f"review_decision={decision!r}"
     )
+    # Before the report, so an over-cap refusal leaves none.
+    write_outputs(cap_cells=len(runnable), **stages, head_sha=head, **auto_outputs)
     write_report(
         {
             "excluded_envs": excluded,
@@ -1182,18 +1183,6 @@ def bare_main(auto=False):
             **auto_report,
         }
     )
-    write_outputs(
-        **wv.env_level_outputs(per_level),
-        first_level=first_level(per_level),
-        head_sha=head,
-        **auto_outputs,
-    )
-
-
-def first_level(per_level):
-    """The lowest env-level of `per_level` with a cell in any wave, as `'0'`..`'3'`; `''` when
-    none has one. `apply-run.yml`'s `lock` snapshots and releases that level's wave0."""
-    return next((str(n) for n, waves in enumerate(per_level) if any(waves.values())), "")
 
 
 def main():
@@ -1254,16 +1243,16 @@ def main():
     refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
 
-    # Before the padding, whose over-depth refusal is where this line helps most.
+    # Before `stage_outputs`, whose stage-count refusal is where this line helps most.
     print(dag_shape_notice(deps))
-    per_level = wv.env_level_waves(runnable, {}, deps)
-    w0 = per_level[0]
+    stages = wv.stage_outputs({}, deps, runnable)
     print(
         f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"waiting={len(waiting)} locked={len(locked)} "
-        f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
+        f"stages={stages['counts']} empty={stages['empty']}"
     )
+    write_outputs(cap_cells=len(runnable), **stages, head_sha=head, base_sha=base_sha)
     write_report(
         {
             "review_not_required_envs": no_review_required,
@@ -1271,12 +1260,6 @@ def main():
             "held_cells": held_cells(locked),
             "env_order": [env],
         }
-    )
-    write_outputs(
-        **wv.env_level_outputs(per_level),
-        first_level=first_level(per_level),
-        head_sha=head,
-        base_sha=base_sha,
     )
 
 

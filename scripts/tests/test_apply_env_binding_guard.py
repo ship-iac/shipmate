@@ -3,18 +3,19 @@
 Invariants:
 - every cell job -- `plan`, `drift`, `unlock` and `cell.yml`'s `apply` -- binds the row's
   `env_binding` (`${{ matrix.env_binding }}`, or `fromJSON(inputs.cell)`'s in `cell.yml`) and
-  nothing else; the eight waves that call `cell.yml` bind none, which a calling job cannot.
+  nothing else; `waves.yml`'s `stage` and `stage.yml`'s `cell`, which call a workflow, bind none,
+  which a calling job cannot.
   `env-config`'s `resolve` stamps that value on every detect row, so the binding is decided in
   one place, from the default branch's environment table; a job that computes its own is the
-  regression. Where the bound environment does not exist, snapshot's pre-flight refuses the
+  regression. Where the bound environment does not exist, `entry`'s pre-flight refuses the
   run: the fingerprint pins nothing about the binding, because plan and apply resolve a cell's
   variables from the same table (CONTRACT.md §Env model);
-- snapshot and complete each bind shipmate-engine, the environment holding the App key both
+- `entry` and `complete` each bind shipmate-engine, the environment holding the App key both
   mint from: a job that gains an env-derived binding is the regression;
-- snapshot runs the environment pre-flight before it snapshots the apply checks,
-  and both before any wave: the pre-flight is only a control while it can still
-  refuse the run. `apply-run.yml`'s `lock` does the same for the first populated
-  env-level, before its wave0 release;
+- `entry` runs the environment pre-flight before it snapshots the apply checks,
+  and both before the stage's cells: the pre-flight is only a control while it can still
+  refuse the run. `apply-run.yml`'s `lock` does the same for the first env-level, before
+  its first stage's release;
 - every apply-cell invocation passes the reviewed plan text's digest, which the
   action refuses to apply without.
 
@@ -24,7 +25,7 @@ Both rules are gone: which environment is shared is `split: false` in the table,
 tier that resolves is pinned by
 `test_env_config_resolve.py::test_the_binding_and_tier_follow_the_split_key`.
 
-The realistic failure is accidental regression -- a restored expression, one missed wave, a new
+The realistic failure is accidental regression -- a restored expression, one missed job, a new
 cell job with a hand-rolled binding -- not a hostile edit to these SHA-pinned files, so one
 whole-value comparison per job, plus a derived job set compared to the hand-written one, covers
 it.
@@ -34,11 +35,10 @@ from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, local_action, workflow_jobs
 
 CELL_ENV = "${{ matrix.env_binding }}"
 CALLED_CELL_ENV = "${{ fromJSON(inputs.cell).env_binding }}"
-WAVES = [f"wave{i}" for i in range(8)]
 
 #: The apply cell, and the matrix field carrying the digest of the plan text a reviewer approved.
 #: A composite action's `required: true` is not enforced, so a dropped `with:` line arrives as the
-#: empty string; apply-cell refuses that, which turns a wiring slip into eight failed applies.
+#: empty string; apply-cell refuses that, which turns a wiring slip into failed applies.
 APPLY_CELL = local_action("apply-cell")
 PLAN_SHA256 = "${{ fromJSON(inputs.cell).plan_sha256 }}"
 
@@ -50,10 +50,15 @@ CELL_BOUND = {
     ("cell.yml", "apply"): CALLED_CELL_ENV,
 }
 
-#: snapshot's steps, in order, by action path: a reorder must redden this.
-SNAPSHOT_STEPS = [
+#: `entry`'s steps, in order, by action path (`None` for a `run:` step): a reorder must redden
+#: this.
+ENTRY_STEPS = [
+    None,
+    local_action("apply-release"),
     local_action("verify-environments"),
     local_action("apply-snapshot"),
+    None,
+    local_action("apply-release"),
 ]
 
 
@@ -71,13 +76,14 @@ def test_every_cell_job_binds_the_resolved_environment():
 
 #: Matrix jobs that bind no environment, written by hand. `warm` runs `init -backend=false` on
 #: the merged commit to fill the provider cache: no backend, no credentials, and a protected apply
-#: environment would hold each leg for a reviewer. The waves call `cell.yml`, whose `apply` binds.
-UNBOUND_MATRIX = {("deploy.yml", "warm"), *(("apply-env-level.yml", w) for w in WAVES)}
+#: environment would hold each leg for a reviewer. `stage` calls `stage.yml` and `cell` calls
+#: `cell.yml`, whose `apply` binds.
+UNBOUND_MATRIX = {("deploy.yml", "warm"), ("waves.yml", "stage"), ("stage.yml", "cell")}
 
 
 def test_the_unbound_matrix_jobs_bind_no_environment():
     """Mutations: add `environment: ${{ matrix.env_binding }}` to `deploy.yml`'s `warm`, then to
-    `apply-env-level.yml`'s `wave2`."""
+    `stage.yml`'s `cell`."""
     for workflow, job_id in sorted(UNBOUND_MATRIX):
         assert "environment" not in workflow_jobs(workflow)[job_id]
 
@@ -98,31 +104,31 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
     assert found == (set(CELL_BOUND) - {("cell.yml", "apply")}) | UNBOUND_MATRIX
 
 
-def test_snapshot_and_complete_bind_the_engine_environment():
-    """Mutation: drop `snapshot`'s `environment:` binding."""
-    jobs = workflow_jobs("apply-env-level.yml")
-    assert {j: jobs[j].get("environment") for j in ("snapshot", "complete")} == {
-        "snapshot": ENGINE_ENVIRONMENT,
+def test_entry_and_complete_bind_the_engine_environment():
+    """Mutation: drop `entry`'s `environment:` binding."""
+    jobs = workflow_jobs("stage.yml")
+    assert {j: jobs[j].get("environment") for j in ("entry", "complete")} == {
+        "entry": ENGINE_ENVIRONMENT,
         "complete": ENGINE_ENVIRONMENT,
     }
 
 
-def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
-    """Mutation: swap snapshot's two steps."""
-    steps = workflow_jobs("apply-env-level.yml")["snapshot"]["steps"]
-    assert [s["uses"].split("@")[0] for s in steps] == SNAPSHOT_STEPS, (
-        "snapshot's steps changed: the environment pre-flight must run first and "
-        "the whole job before wave0, or the applies it exists to refuse have "
-        "already started"
+def test_entry_verifies_the_environments_before_snapshotting_the_checks():
+    """Mutations: swap `entry`'s verify and snapshot steps; `needs: []` on `cell`;
+    `continue-on-error: true` on the guard step."""
+    jobs = workflow_jobs("stage.yml")
+    steps = jobs["entry"]["steps"]
+    assert [s.get("uses") for s in steps] == ENTRY_STEPS, (
+        "entry's steps changed: the environment pre-flight must run before the snapshot and "
+        "the release, or the applies it exists to refuse have already started"
     )
-    assert steps[0].get("continue-on-error") in (None, False), (
-        "the pre-flight step is continue-on-error: it would name the missing "
-        "environments and let the waves apply into them anyway"
+    assert [s.get("continue-on-error") for s in steps] == [None] * len(steps), (
+        "an entry step is continue-on-error: a refused guard or pre-flight would let the "
+        "stage's cells apply anyway"
     )
-    wave0_needs = workflow_jobs("apply-env-level.yml")["wave0"]["needs"]
-    assert wave0_needs == ["snapshot", "wave0-release"], (
-        "wave0 must wait for snapshot whenever snapshot runs, or the pre-flight refuses "
-        "a run whose first wave is already applying"
+    assert jobs["cell"]["needs"] == ["entry"], (
+        "the cells must wait for entry whenever it runs, or the pre-flight refuses a stage "
+        "whose cells are already applying"
     )
 
 

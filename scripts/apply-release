@@ -1,23 +1,47 @@
 #!/usr/bin/env python3
-"""Flip one wave's apply checks to `in_progress` before the wave runs: `apply-release`.
+"""Guard a stage, then release it: `apply-release guard`, then `apply-release release`.
 
-`SHIPMATE_SNAPSHOT_JSON` is the wave's `apply-snapshot` slice, `{check name: [check id, ...]}`.
-Each id gets one PATCH, one at a time, of exactly `{"status": "in_progress", "details_url": <this
-run's page>, "started_at": <the release, UTC, to the second>}` through `patch-checks`, which also
-writes nothing on a pre-merge re-run, nor on a pre-merge run whose pull request,
-`SHIPMATE_PR_NUMBER`, reads merged (one read, one notice; a merge deploy reads none). Never
-`output`: that would replace the check's plan text. A failed write or read fails the job, which
-skips the wave; the level's `complete`, or `apply-run.yml`'s `unflip` for the first level's
-wave0 that `lock` released, returns every check of it to `queued`, titled `Not run`.
+`guard` lets stage `SHIPMATE_STAGE_KEYS[SHIPMATE_STAGE_N]` start only when every earlier stage
+key `keys[j]` lists exactly `SHIPMATE_STAGE_COUNTS[j]` cells (`<env> / <stack>`) whose `apply`
+and `save` jobs concluded `success`, read from this run attempt's jobs (`listed_jobs` with
+`attempt`, every page, carried jobs included) under the calling job's own prefix: the name
+`level_of` gives `SHIPMATE_JOB_ID`, which must end in ` / <own key>`. A concluded job that is not
+`success` refuses at once, and so does an earlier stage with no cell rows whose unexpanded cell
+matrix row (`apply-gate.unexpanded_rows`) is listed concluded; fewer cells, an unconcluded job,
+an unreadable listing or one not listing the calling job re-lists every `GUARD_POLL` seconds and
+refuses `GUARD_DEADLINE` seconds after the first listing. A refusal is one `::error::` naming
+the stage and the cause: the observed cell, the stage and its observed and expected cell counts,
+or the stage whose cell matrix never expanded; exit 1.
+
+`release` flips stage `SHIPMATE_STAGE_KEY` of `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s
+`{stage key: {check name: [check id, ...]}}`, to `in_progress`, selected by exact key, refusing a
+key the snapshot lacks. Each id gets one PATCH, one at a time, of exactly `{"status":
+"in_progress", "details_url": <this run's page>, "started_at": <the release, UTC, to the
+second>}` through `patch-checks`, which also writes nothing on a pre-merge re-run, nor on a
+pre-merge run whose pull request, `SHIPMATE_PR_NUMBER`, reads merged (one read, one notice; a
+merge deploy reads none). Never `output`: that would replace the check's plan text. A failed
+write or read fails the job, which skips the stage; its `complete`, or `apply-run.yml`'s
+`unflip` for the first stage that `lock` released, returns every check of it to `queued`,
+titled `Not run`.
 """
 
 import json
 import os
+import re
+import sys
+import time
 from datetime import UTC, datetime
 
-from _shipmate import _load, current_run_url, run_annotated
+from _shipmate import _load, current_run_url, listed_jobs, run_annotated, sleep
 
+ag = _load("apply-gate")
 pc = _load("patch-checks")
+
+#: The guard's re-list interval and deadline, in seconds; the deadline keeps `entry` far inside
+#: the slim runner's 15-minute cap.
+GUARD_POLL = 10
+GUARD_DEADLINE = 120
+_clock = time.monotonic
 
 
 def _now():
@@ -35,10 +59,126 @@ def flips(snapshot, url, started):
     ]
 
 
-def main():
+def _shape_refusal(jobs, level, key, cells, count):
+    """Why stage `key` at `level`, listing `cells` cells of `count`, can never prove itself:
+    its cell matrix ended unexpanded (`apply-gate.unexpanded_rows` concluded, no cell rows) or
+    it lists more cells than `count`; "" otherwise."""
+    ended = [
+        j.get("conclusion")
+        for j in ag.unexpanded_rows(jobs, level)
+        if j.get("status") == "completed"
+    ]
+    if ended and not cells:
+        return f"the cell matrix of stage {key} never expanded: it concluded {ended[0]}"
+    if cells > count:
+        return f"stage {key} lists {cells} cells, not {count}"
+    return ""
+
+
+def guard_verdict(jobs, prefix, keys, counts, n):
+    """`("pass" | "wait" | "refuse", reason)` for stage `keys[n]` under `prefix` (the name
+    before the stage segment) over the listed `jobs`: the rule of the module docstring. The
+    first refusal wins over every wait; the first wait reason names an unconcluded cell before
+    any count."""
+    waits = []
+    for key, count in zip(keys[:n], counts[:n], strict=True):
+        head = f"{prefix} / {key} / "
+        parts = {}
+        for job in jobs:
+            name = job.get("name", "")
+            cell, _, part = name.removeprefix(head).rpartition(" / ")
+            if not (name.startswith(head) and cell and part in ("apply", "save")):
+                continue
+            done = parts.setdefault(cell, set())
+            conclusion = job.get("conclusion") if job.get("status") == "completed" else None
+            if conclusion == "success":
+                done.add(part)
+            elif conclusion:
+                return (
+                    "refuse",
+                    f"cell {cell} of stage {key} concluded {conclusion} in its {part} job",
+                )
+            else:
+                waits.append(f"cell {cell} of stage {key} has no conclusion in its {part} job")
+        refusal = _shape_refusal(jobs, f"{prefix} / {key}", key, len(parts), count)
+        if refusal:
+            return "refuse", refusal
+        applied = sum(done == {"apply", "save"} for done in parts.values())
+        if applied < count:
+            waits.append(f"stage {key} lists {applied} of {count} cells applied and saved")
+    return ("wait", waits[0]) if waits else ("pass", "")
+
+
+def _listed_verdict(keys, counts, n, job_id):
+    jobs = listed_jobs(
+        os.environ["GITHUB_REPOSITORY"],
+        os.environ["GITHUB_RUN_ID"],
+        attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+    )
+    if jobs is None:
+        return "wait", "the run attempt's jobs could not be listed"
+    level = ag.level_of(jobs, job_id)
+    if not level:
+        return "wait", f"the run attempt's jobs do not list job {job_id}"
+    prefix = ag.stage_prefix(level)
+    if level != f"{prefix} / {keys[n]}":
+        return "refuse", f"job {job_id} runs as {level}, not in stage {keys[n]}"
+    return guard_verdict(jobs, prefix, keys, counts, n)
+
+
+def _guard_inputs():
+    try:
+        keys = json.loads(os.environ["SHIPMATE_STAGE_KEYS"])
+        counts = json.loads(os.environ["SHIPMATE_STAGE_COUNTS"])
+        n = int(os.environ["SHIPMATE_STAGE_N"])
+        job_id = os.environ["SHIPMATE_JOB_ID"]
+    except (KeyError, ValueError):
+        keys = None
+    if not (
+        isinstance(keys, list)
+        and isinstance(counts, list)
+        and len(keys) == len(counts)
+        and 0 <= n < len(keys)
+        and all(isinstance(k, str) and re.fullmatch(ag.STAGE, k) for k in keys)
+        and all(type(c) is int and c > 0 for c in counts)
+        and job_id.isdigit()
+    ):
+        raise SystemExit(
+            "::error::the stage guard needs keys and counts, JSON lists of one length, "
+            "a stage index n inside them and the calling job's id"
+        )
+    return keys, counts, n, job_id
+
+
+def guard():
+    keys, counts, n, job_id = _guard_inputs()
+    deadline = _clock() + GUARD_DEADLINE
+    while True:
+        verdict, reason = _listed_verdict(keys, counts, n, job_id)
+        if verdict == "pass":
+            return
+        if verdict == "refuse" or _clock() >= deadline:
+            raise SystemExit(f"::error::stage {keys[n]} cannot start: {reason}")
+        sleep(GUARD_POLL)
+
+
+def release():
     started = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    pc.write(flips(json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"]), current_run_url(), started))
+    by_wave = json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"])
+    key = os.environ["SHIPMATE_STAGE_KEY"]
+    if not isinstance(by_wave, dict) or key not in by_wave:
+        raise SystemExit(f"::error::the stage snapshot holds no stage {key!r}")
+    pc.write(flips(by_wave[key], current_run_url(), started))
+
+
+MODES = {"guard": guard, "release": release}
+
+
+def main(argv=()):
+    if len(argv) != 1 or argv[0] not in MODES:
+        raise SystemExit("::error::usage: apply-release guard|release")
+    MODES[argv[0]]()
 
 
 if __name__ == "__main__":
-    run_annotated(main, usage="apply-release")
+    run_annotated(main, sys.argv[1:])

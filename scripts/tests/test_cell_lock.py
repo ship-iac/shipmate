@@ -1456,7 +1456,6 @@ def test_marks_on_the_default_branch_reads_no_holder(monkeypatch, tmp_path, caps
 
 
 HEAD = "d" * 40
-EMPTY_WAVES = json.dumps({f"wave{i}": [] for i in range(8)})
 CHECK_RUNS_READ = [
     "gh",
     "api",
@@ -1500,40 +1499,34 @@ def _main(monkeypatch, tmp_path, command, gh, env):
     return github_outputs(out)
 
 
-def _waves(level0=EMPTY_WAVES):
-    return {
-        "SHIPMATE_ENVLEVEL0_WAVES": level0,
-        **{f"SHIPMATE_ENVLEVEL{n}_WAVES": EMPTY_WAVES for n in (1, 2, 3)},
-    }
+def _cells(*cells):
+    return {"SHIPMATE_CELLS": json.dumps(list(cells))}
 
 
 def test_acquire_locks_every_wave_cell_then_fences(monkeypatch, tmp_path):
     """Mutation: skip `fence_open` (the state read is never sent)."""
     gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), "{}")
     gh.on(PR_STATE_READ, _pr_state("OPEN"))
-    level0 = json.dumps({"wave0": [], "wave1": [AUTH]})
-    _main(monkeypatch, tmp_path, "acquire", gh, _waves(level0))
+    _main(monkeypatch, tmp_path, "acquire", gh, _cells(AUTH))
     assert gh.drained()
 
 
-def test_acquire_locks_the_union_of_every_level_and_wave(monkeypatch, tmp_path):
-    """Mutation: read only `SHIPMATE_ENVLEVEL0_WAVES` (the other levels' cells stay unlocked)."""
+def test_acquire_locks_every_cell_of_the_run(monkeypatch, tmp_path):
+    """Mutation: lock only `_run_cells()[:1]` (the other cells stay unlocked)."""
     cells = [
-        (0, "wave0", AUTH),
-        (1, "wave2", {"stack": "stacks/app", "environment": "stage"}),
-        (2, "wave0", {"stack": "stacks/dns", "environment": "prod"}),
-        (3, "wave7", {"stack": "stacks/edge", "environment": "qa"}),
+        AUTH,
+        {"stack": "stacks/app", "environment": "stage"},
+        {"stack": "stacks/dns", "environment": "prod"},
+        {"stack": "stacks/edge", "environment": "qa"},
     ]
     gh = Gh().on(TREE_WRITE, json.dumps({"sha": TREE}))
-    env = _waves()
-    for n, wave, cell in cells:
+    for n, cell in enumerate(cells):
         sha = str(n + 1) * 40
         msg = message(PR, cell["environment"], cell["stack"])
         gh.on(commit_write(cell), commit(sha, msg, LATE))
         gh.on(ref_write(cl.ref_name(cell["environment"], cell["stack"]), sha), "{}")
-        env[f"SHIPMATE_ENVLEVEL{n}_WAVES"] = json.dumps({wave: [cell]})
     gh.on(PR_STATE_READ, _pr_state("OPEN"))
-    _main(monkeypatch, tmp_path, "acquire", gh, env)
+    _main(monkeypatch, tmp_path, "acquire", gh, _cells(*cells))
     assert gh.drained()
 
 
@@ -1541,23 +1534,28 @@ def test_acquire_locks_the_union_of_every_level_and_wave(monkeypatch, tmp_path):
     ("env", "refusal"),
     [
         pytest.param(
-            {"SHIPMATE_ENVLEVEL2_WAVES": None},
-            "SHIPMATE_ENVLEVEL2_WAVES must be a JSON map of waves",
+            {"SHIPMATE_CELLS": None},
+            "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
             id="missing",
         ),
         pytest.param(
-            {"SHIPMATE_ENVLEVEL1_WAVES": "nope"},
-            "SHIPMATE_ENVLEVEL1_WAVES must be a JSON map of waves",
+            {"SHIPMATE_CELLS": ""},
+            "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
+            id="empty",
+        ),
+        pytest.param(
+            {"SHIPMATE_CELLS": "nope"},
+            "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
             id="not-json",
         ),
         pytest.param(
-            {"SHIPMATE_ENVLEVEL3_WAVES": "[]"},
-            "SHIPMATE_ENVLEVEL3_WAVES must be a JSON map of waves",
-            id="not-a-map",
+            {"SHIPMATE_CELLS": json.dumps({"L0-W0": [AUTH]})},
+            "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
+            id="not-a-list",
         ),
         pytest.param(
-            {"SHIPMATE_ENVLEVEL0_WAVES": json.dumps({"wave0": [{"stack": 1}]})},
-            "every wave cell must be a {stack, environment} object",
+            {"SHIPMATE_CELLS": json.dumps([{"stack": 1}])},
+            "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
             id="bad-cell",
         ),
         pytest.param(
@@ -1573,12 +1571,10 @@ def test_acquire_locks_the_union_of_every_level_and_wave(monkeypatch, tmp_path):
     ],
 )
 def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, refusal):
-    """Mutations: drop `KeyError` (missing), `ValueError` (not-json) or `AttributeError`
-    (not-a-map) from `_wave_cells`' except; drop its `checked is None` refusal (bad-cell); drop
-    the run id check (no-run-id and bad-attempt reach the API)."""
-    level0 = json.dumps({"wave0": [AUTH]})
+    """Mutations: drop `_run_cells`' `cells is None` refusal (missing, empty, not-json,
+    not-a-list, bad-cell); drop the run id check (no-run-id and bad-attempt reach the API)."""
     with pytest.raises(SystemExit) as exc:
-        _main(monkeypatch, tmp_path, "acquire", Gh(), {**_waves(level0), **env})
+        _main(monkeypatch, tmp_path, "acquire", Gh(), {**_cells(AUTH), **env})
     assert exc.value.code == "::error::" + refusal
 
 
@@ -2143,8 +2139,8 @@ WARMING = {
     "detect": "completed",
     "warm / stacks/app": "in_progress",
     "warm / tools": "queued",
-    "L0 / dev / stacks/app / apply": "completed",
-    "L0 / dev / stacks/app / save": "completed",
+    "waves / L0-W0 / dev / stacks/app / apply": "completed",
+    "waves / L0-W0 / dev / stacks/app / save": "completed",
     "summary": "completed",
 }
 
@@ -2192,7 +2188,7 @@ def test_evict_proceeds_past_a_deploy_run_only_warming(monkeypatch, tmp_path, ca
     ("job", "status"),
     [
         pytest.param("detect", "in_progress", id="detect"),
-        pytest.param("L0 / dev / stacks/app / apply", "waiting", id="cell"),
+        pytest.param("waves / L0-W0 / dev / stacks/app / apply", "waiting", id="cell"),
         pytest.param("summary", "queued", id="summary"),
         pytest.param("summary", None, id="summary-not-listed"),
     ],
@@ -3107,7 +3103,7 @@ def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch
 
 
 OWN_JOBS = ["gh", "api", f"repos/{REPO}/actions/runs/900/jobs?filter=all&per_page=100&page=1"]
-_CELL = "deploy / L0 / dev / stacks/auth"
+_CELL = "deploy / waves / L0-W0 / dev / stacks/auth"
 #: This attempt's own `apply` row, whose id the pre-apply step receives as `JOB_ID`.
 OWN_ROW = {
     "id": 7,
@@ -3172,6 +3168,24 @@ def test_verify_deploy_refuses_a_cell_an_earlier_attempt_applied_unsaved(monkeyp
     )
 
 
+def test_verify_deploy_refuses_a_cell_applied_unsaved_in_another_stage(monkeypatch, tmp_path):
+    """A changed `needs` edge moved the cell from `L0-W1` (attempt 1) to `L0-W2` (this
+    attempt). Mutation: read the rows of this job's stage only (`cell_rows` at `level_of`)
+    -- passes, red."""
+    jobs = json.loads(_own_jobs("failure"))["jobs"]
+    jobs = [
+        {**j, "name": j["name"].replace("L0-W0", "L0-W1" if j["run_attempt"] == 1 else "L0-W2")}
+        for j in jobs
+    ]
+    listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, RERUN) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: run attempt 1 of this deploy may "
+        "have applied this cell without saving its state; follow docs/troubleshooting.md "
+        "section The apply step ran and its state was not saved"
+    )
+
+
 def test_verify_deploy_names_every_earlier_attempt_that_applied_unsaved(monkeypatch, tmp_path):
     """Mutation: write `run attempt` whatever the count -- red."""
     first = json.loads(_own_jobs("failure"))["jobs"][:2]
@@ -3228,7 +3242,7 @@ def test_verify_deploy_reads_no_jobs_on_the_first_attempt(monkeypatch, tmp_path)
 def test_verify_deploy_refuses_a_rerun_whose_attempts_it_cannot_read(
     monkeypatch, tmp_path, listing, job_id
 ):
-    """Mutation: drop the `if not level` refusal (an unreadable listing reads as no rows) --
+    """Mutation: drop the `if not prefix` refusal (an unreadable listing reads as no rows) --
     every case passes. Mutation: drop `counted=True` -- short passes."""
     gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
     assert _verify_refusal(monkeypatch, tmp_path, gh, {**RERUN, "JOB_ID": job_id}) == (

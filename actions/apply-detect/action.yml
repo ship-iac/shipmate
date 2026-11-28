@@ -32,15 +32,12 @@ inputs:
     required: false
     default: ""
 outputs:
-  envlevel0_waves: { description: "JSON wave0..wave7 map for env-level 0. A targeted apply puts every cell here.", value: "${{ steps.d.outputs.envlevel0_waves }}" }
-  envlevel1_waves: { description: JSON wave0..wave7 map for env-level 1, value: "${{ steps.d.outputs.envlevel1_waves }}" }
-  envlevel2_waves: { description: JSON wave0..wave7 map for env-level 2, value: "${{ steps.d.outputs.envlevel2_waves }}" }
-  envlevel3_waves: { description: JSON wave0..wave7 map for env-level 3, value: "${{ steps.d.outputs.envlevel3_waves }}" }
-  envlevel0_empty: { description: "'true' when env-level 0 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel0_empty }}" }
-  envlevel1_empty: { description: "'true' when env-level 1 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel1_empty }}" }
-  envlevel2_empty: { description: "'true' when env-level 2 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel2_empty }}" }
-  envlevel3_empty: { description: "'true' when env-level 3 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel3_empty }}" }
-  first_level: { description: "The lowest env-level with a cell in any wave, '0' to '3'; empty when no level has one.", value: "${{ steps.d.outputs.first_level }}" }
+  levels: { description: "JSON list, one element per populated env-level in run order; each element is a JSON string of that level's `{\"L<i>-W<w>\": [cell row, ...]}` stage map. A targeted apply has one level.", value: "${{ steps.d.outputs.levels }}" }
+  stages: { description: "JSON list in run order of `{key, n, level, first}`: the stage key, its run position, its index into `levels`, and whether it is its level's first stage.", value: "${{ steps.d.outputs.stages }}" }
+  keys: { description: "JSON list of the stage keys in run order.", value: "${{ steps.d.outputs.keys }}" }
+  counts: { description: "JSON list of each stage's cell count in run order.", value: "${{ steps.d.outputs.counts }}" }
+  cells: { description: "JSON list of every cell's `{stack, environment}`, in run order.", value: "${{ steps.d.outputs.cells }}" }
+  empty: { description: "'true' when no stage has a cell.", value: "${{ steps.d.outputs.empty }}" }
   head_sha: { description: "The echoed head SHA.", value: "${{ steps.d.outputs.head_sha }}" }
   provenance_run: { description: "Auto form only: the autoplan run every applied cell's record names; empty when no cell applies.", value: "${{ steps.d.outputs.provenance_run }}" }
   base_sha: { description: "The tip of the pull request's base branch, read from its ref (in the auto form after the mergeability wait), that the behind cells were computed on; empty when no cell was selected to apply.", value: "${{ steps.d.outputs.base_sha }}" }

@@ -9,9 +9,11 @@ takes it for the same reason, its calls growing with the open pull requests. The
 jobs take the 1-CPU `ubuntu-slim` image. `deploy.yml`'s `warm` saves the provider and OpenTofu
 cache entries the cells restore, whose keys carry the runner's OS and architecture, so it takes the
 cells' runner, as `cell.yml`'s `save` does for the state entry `apply` restores.
-`apply.yml`'s `run` and `apply-env-level.yml`'s waves call a workflow and take no runner. Engine
+`apply.yml`'s `run`, both callers' `waves`, `waves.yml`'s `stage` and `stage.yml`'s `cell` call a
+workflow and take no runner. Engine
 CI (`ci.yml`, `manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped
-label fails here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`;
+label fails here. Mutations: `stage.yml` `complete` to `${{ inputs.runs_on }}`; `stage.yml`
+`entry` to `ubuntu-latest`;
 `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to `${{ inputs.runs_on }}`; the
 `cell.yml` `save` job to `ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml`
 `unlock` to `ubuntu-latest`; `apply-run.yml` `lock` to `ubuntu-slim`; `release.yml` `release`
@@ -26,9 +28,8 @@ LATEST = "ubuntu-latest"
 INPUT = "${{ inputs.runs_on }}"
 
 EXPECTED = {
-    ("apply-env-level.yml", "snapshot"): SLIM,
-    **{("apply-env-level.yml", f"wave{n}-release"): SLIM for n in range(8)},
-    ("apply-env-level.yml", "complete"): SLIM,
+    ("stage.yml", "entry"): SLIM,
+    ("stage.yml", "complete"): SLIM,
     ("cell.yml", "apply"): INPUT,
     ("cell.yml", "save"): INPUT,
     ("apply.yml", "guard"): SLIM,

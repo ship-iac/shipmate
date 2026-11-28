@@ -1,13 +1,11 @@
 """The plan run id reaches `apply-cell` per cell, never as a workflow input.
 
-Each wave cell carries its own `plan_run_id`, read from that cell's own apply
+Each cell row carries its own `plan_run_id`, read from that cell's own apply
 check, so no workflow needs to thread one id down for every cell in the run.
 Two properties, because a rail can come back at either end: no workflow declares
-the input, and every wave job hands `cell.yml` its whole matrix row, from which
+the input, and `stage.yml`'s `cell` job hands `cell.yml` its whole matrix row, from which
 `apply-cell` reads the value.
 """
-
-import re
 
 from _loader import WORKFLOWS, workflow_yaml
 
@@ -17,20 +15,6 @@ from _loader import WORKFLOWS, workflow_yaml
 #: inputs is listed as `{}`, so a new workflow reaching for the retired rail cannot dodge the
 #: comparison.
 EXPECTED_INPUTS = {
-    "apply-env-level.yml": {
-        "workflow_call": [
-            "auto",
-            "base_sha",
-            "by_wave",
-            "deploy",
-            "head_sha",
-            "pr_number",
-            "provenance_run",
-            "runs_on",
-            "tools",
-            "waves_json",
-        ]
-    },
     "apply.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
     "cell.yml": {
         "workflow_call": [
@@ -56,17 +40,48 @@ EXPECTED_INPUTS = {
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on"]},
     "release.yml": {"workflow_call": ["runs_on"]},
+    "stage.yml": {
+        "workflow_call": [
+            "auto",
+            "base_sha",
+            "by_wave",
+            "counts",
+            "deploy",
+            "first",
+            "head_sha",
+            "key",
+            "keys",
+            "level_waves",
+            "n",
+            "pr_number",
+            "provenance_run",
+            "runs_on",
+            "tools",
+        ]
+    },
     "unlock.yml": {"workflow_call": ["environment", "ref", "runs_on"]},
+    "waves.yml": {
+        "workflow_call": [
+            "auto",
+            "base_sha",
+            "by_wave",
+            "counts",
+            "deploy",
+            "head_sha",
+            "keys",
+            "levels",
+            "pr_number",
+            "provenance_run",
+            "runs_on",
+            "stages",
+            "tools",
+        ]
+    },
 }
-
-#: The wave fan-out `apply-env-level.yml` pre-declares. Hand-written, so a deleted wave job
-#: reddens instead of passing by absence: a wave job referencing a workflow input the file no
-#: longer declares fails the run at startup with no job and no log, which is why "every job that
-#: exists is correct" is not enough.
-EXPECTED_WAVE_JOBS = ["wave0", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
 
 PER_CELL_PLAN_RUN = "${{ fromJSON(inputs.cell).plan_run_id }}"
 WHOLE_ROW = "${{ toJSON(matrix) }}"
+CELL = "./.github/workflows/cell.yml"
 
 
 def _inputs(spec):
@@ -86,13 +101,13 @@ def test_no_engine_workflow_declares_a_plan_run_id_input():
     assert found == EXPECTED_INPUTS, f"engine workflow inputs changed: {found}"
 
 
-def test_every_wave_job_takes_the_plan_run_id_from_its_matrix_cell():
-    """Mutations: pass `cell: ${{ toJSON(inputs) }}` on `wave4`; read `plan-run-id` from
-    `inputs.provenance_run` in `cell.yml`."""
-    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    wave_jobs = sorted(j for j in jobs if re.fullmatch(r"wave[0-9]+", j))
-    assert wave_jobs == EXPECTED_WAVE_JOBS, f"wave fan-out changed: {wave_jobs}"
-    assert {j: jobs[j]["with"]["cell"] for j in wave_jobs} == dict.fromkeys(wave_jobs, WHOLE_ROW)
+def test_the_cell_job_takes_the_plan_run_id_from_its_matrix_row():
+    """Mutations: pass `cell: ${{ toJSON(inputs) }}` on `stage.yml`'s `cell`; read `plan-run-id`
+    from `inputs.provenance_run` in `cell.yml`."""
+    jobs = workflow_yaml("stage.yml")["jobs"]
+    cell_callers = sorted(j for j, job in jobs.items() if job.get("uses") == CELL)
+    assert cell_callers == ["cell"], f"cell.yml callers changed: {cell_callers}"
+    assert jobs["cell"]["with"]["cell"] == WHOLE_ROW
     steps = workflow_yaml("cell.yml")["jobs"]["apply"]["steps"]
     cell = [s for s in steps if "actions/apply-cell" in (s.get("uses") or "")]
     assert [s["with"]["plan-run-id"] for s in cell] == [PER_CELL_PLAN_RUN]

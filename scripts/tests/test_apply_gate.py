@@ -76,46 +76,118 @@ def test_a_one_segment_stack_parses_env_first():
 @pytest.mark.parametrize(
     ("job_name", "stack", "env", "expected"),
     [
-        ("L0 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", "apply"),
-        ("apply / run / L2 / dev-eu / stacks/app / save", "stacks/app", "dev-eu", "save"),
+        ("L0-W0 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", "apply"),
+        (
+            "apply / run / waves / L2-W10 / dev-eu / stacks/app / save",
+            "stacks/app",
+            "dev-eu",
+            "save",
+        ),
+        ("deploy / waves / L0-W3 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", "apply"),
         ("apply / run / detect", "detect", "run", None),
-        ("L0 / dev-eu / stacks/app / apply", "stacks/app", "eu", None),
+        ("L0-W0 / dev-eu / stacks/app / apply", "stacks/app", "eu", None),
         ("dev-eu / stacks/app / apply", "stacks/app", "dev-eu", None),
-        ("L0 / dev-eu / stacks/app", "stacks/app", "dev-eu", None),
-        ("L0 / dev-eu / stacks/app / plan", "stacks/app", "dev-eu", None),
-        ("L0 / dev-eu / stacks/app / apply / x", "stacks/app", "dev-eu", None),
+        ("L0-W0 / dev-eu / stacks/app", "stacks/app", "dev-eu", None),
+        ("L0-W0 / dev-eu / stacks/app / plan", "stacks/app", "dev-eu", None),
+        ("L0-W0 / dev-eu / stacks/app / apply / x", "stacks/app", "dev-eu", None),
+        ("apply / run / L0 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", None),
+        ("apply / run / waves / W0 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", None),
+        ("apply / run / waves / L0-W / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", None),
     ],
 )
 def test_cell_part_reads_these_literal_names(job_name, stack, env, expected):
-    """Mutations: drop `L[0-9]+` from the pattern; `search` for `fullmatch`; accept any last
-    segment as the part."""
+    """The old `L<n>` shape, `W0` and `L0-W` are no stage. Mutations: drop `STAGE` from the
+    pattern; loosen `STAGE` to `L[0-9]+`; `search` for `fullmatch`; accept any last segment
+    as the part."""
     assert ag.cell_part(job_name, stack, env) == expected
 
 
 _LEVELED = [
-    {"id": 1, "name": "apply / run / L0 / dev-eu / stacks/app / apply"},
-    {"id": 2, "name": "apply / run / L0 / dev-eu / stacks/app / save"},
-    {"id": 3, "name": "apply / run / L1 / complete"},
-    {"id": 4, "name": "apply / run / L1 / dev-eu / stacks/app / apply"},
-    {"id": 5, "name": "apply / run / L0 / dev-us / stacks/app / save"},
+    {"id": 1, "name": "apply / run / waves / L0-W0 / dev-eu / stacks/app / apply"},
+    {"id": 2, "name": "apply / run / waves / L0-W0 / dev-eu / stacks/app / save"},
+    {"id": 3, "name": "apply / run / waves / L1-W0 / complete"},
+    {"id": 4, "name": "apply / run / waves / L1-W0 / dev-eu / stacks/app / apply"},
+    {"id": 5, "name": "apply / run / waves / L0-W0 / dev-us / stacks/app / save"},
 ]
 
 
 def test_level_of_reads_a_cell_row_and_a_row_directly_under_the_level():
     """Mutation: `level_of` cuts only the last segment, so a cell row's level reads
     `<level> / <env> / <stack>`."""
-    assert ag.level_of(_LEVELED, 2) == "apply / run / L0"
-    assert ag.level_of(_LEVELED, 3) == "apply / run / L1"
+    assert ag.level_of(_LEVELED, 2) == "apply / run / waves / L0-W0"
+    assert ag.level_of(_LEVELED, 3) == "apply / run / waves / L1-W0"
     assert ag.level_of(_LEVELED, 99) == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "level", "prefix"),
+    [
+        (
+            "apply / run / waves / L0-W2 / dev-eu / stacks/app / apply",
+            "apply / run / waves / L0-W2",
+            "apply / run / waves",
+        ),
+        (
+            "deploy / waves / L1-W0 / dev-eu / app / save",
+            "deploy / waves / L1-W0",
+            "deploy / waves",
+        ),
+        (
+            "apply / run / waves / L0-W2 / entry",
+            "apply / run / waves / L0-W2",
+            "apply / run / waves",
+        ),
+        (
+            "L3-W1 / run / waves / L0-W2 / dev-eu / app / apply",
+            "L3-W1 / run / waves / L0-W2",
+            "L3-W1 / run / waves",
+        ),
+        (
+            "L3-W1 / run / waves / L0-W2 / entry",
+            "L3-W1 / run / waves / L0-W2",
+            "L3-W1 / run / waves",
+        ),
+        ("apply / run / L0 / dev-eu / stacks/app / apply", "", ""),
+        ("apply / run / L1 / complete", "", ""),
+    ],
+)
+def test_level_of_and_stage_prefix_read_the_stage_from_the_jobs_suffix(name, level, prefix):
+    """A cell, an `entry` of either caller, a caller named like a stage, and the old `L<n>`
+    shape, which reads no stage. Mutations: `level_of` scans for the first stage-shaped
+    segment -- the `L3-W1` caller reads as the stage; `stage_prefix` returns `level` whole."""
+    jobs = [{"id": 1, "name": name}]
+    assert (ag.level_of(jobs, 1), ag.stage_prefix(ag.level_of(jobs, 1))) == (level, prefix)
 
 
 def test_cell_rows_are_the_rows_of_one_level_by_part():
     """Mutations: `cell_rows` drops the level from the name; a row of another env counts."""
-    assert ag.cell_rows(_LEVELED, "apply / run / L0", "stacks/app", "dev-eu") == {
+    assert ag.cell_rows(_LEVELED, "apply / run / waves / L0-W0", "stacks/app", "dev-eu") == {
         "apply": [_LEVELED[0]],
         "save": [_LEVELED[1]],
     }
     assert ag.cell_rows(_LEVELED, "", "stacks/app", "dev-eu") == {"apply": [], "save": []}
+
+
+_MOVED = [
+    {"id": 1, "run_attempt": 1, "name": "apply / run / waves / L0-W1 / eu / app / apply"},
+    {"id": 2, "run_attempt": 1, "name": "apply / run / waves / L0-W1 / eu / app / save"},
+    {"id": 3, "run_attempt": 2, "name": "apply / run / waves / L0-W2 / eu / app / apply"},
+    {"id": 4, "run_attempt": 2, "name": "apply / run / waves / L0-W2 / dev-eu / app / save"},
+    {"id": 5, "run_attempt": 2, "name": "other / run / waves / L0-W2 / eu / app / save"},
+    {"id": 6, "run_attempt": 1, "name": "apply / run / L0 / eu / app / save"},
+]
+
+
+def test_cell_rows_any_stage_finds_a_cell_that_moved_stage_between_attempts():
+    """Attempt 1 ran the cell in `L0-W1`, attempt 2 in `L0-W2`; env `dev-eu`'s row, another
+    caller's row and an old `L<n>` row are not the cell's. Mutations: match only the stage of
+    attempt 2 -- the `L0-W1` rows drop; drop the ` / ` boundary before the env -- the
+    `dev-eu` row counts."""
+    assert ag.cell_rows_any_stage(_MOVED, "apply / run / waves", "app", "eu") == {
+        "apply": [_MOVED[0], _MOVED[2]],
+        "save": [_MOVED[1]],
+    }
+    assert ag.cell_rows_any_stage(_MOVED, "", "app", "eu") == {"apply": [], "save": []}
 
 
 def test_held_names_are_the_newest_in_progress_runs_titled_held():
@@ -134,8 +206,8 @@ def test_held_names_are_the_newest_in_progress_runs_titled_held():
 
 # Rows copied from jobs?filter=all listings of runs 44161778000 (applied, save failed, failed
 # save re-run) and 44164180908 (cancelled while pending), names re-keyed to the cell grammar.
-_APPLY = "apply / run / L0 / dev-eu / stacks/app / apply"
-_SAVE = "apply / run / L0 / dev-eu / stacks/app / save"
+_APPLY = "apply / run / waves / L0-W0 / dev-eu / stacks/app / apply"
+_SAVE = "apply / run / waves / L0-W0 / dev-eu / stacks/app / save"
 _PROBE_STEP = (
     'Run echo "PROBE {} start $(date -u +%FT%T.%3NZ) group=$GROUP attempt=$GITHUB_RUN_ATTEMPT"'
 )

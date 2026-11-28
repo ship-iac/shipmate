@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -32,15 +33,10 @@ def test_parse_dot_keys_the_root_stack_dot():
 def test_a_root_stack_cell_gets_a_wave():
     """`terramate list` and the tag metadata name the root stack `.`, so its cell must find that
     node; this pins a root cell under an empty env order. Mutation: drop `or "."` from
-    `parse_dot` -> `env_level_waves` refuses "stack '.' is not a node in the run-graph"."""
+    `parse_dot` -> `stage_outputs` refuses "stack '.' is not a node in the run-graph"."""
     cell = {"stack": ".", "environment": "dev-eu", "workload": ""}
-    empty = {f"wave{i}": [] for i in range(8)}
-    assert w.env_level_waves([cell], {}, w.parse_dot(ROOT_FIXTURE)) == [
-        {**empty, "wave0": [cell]},
-        empty,
-        empty,
-        empty,
-    ]
+    out = w.stage_outputs({}, w.parse_dot(ROOT_FIXTURE), [cell])
+    assert json.loads(out["levels"]) == [json.dumps({"L0-W1": [cell]})]  # After `child`.
 
 
 def test_levels_are_topological():
@@ -114,58 +110,15 @@ def test_assign_waves_raises_when_stack_missing_from_graph():
     assert "stacks/does-not-exist" in str(exc_info.value)
 
 
-def test_pad_waves_allows_exactly_max_waves():
-    # Populated waves at indices 0..MAX_WAVES-1, 8 waves in total, are fine.
-    waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)]
-    w.pad_waves(waves)  # must not raise
+def test_stage_outputs_keeps_transitive_order_through_an_unchanged_stack():
+    """Only `a` and `c` of a -> b -> c are pending: `c` still applies a stage after `a`.
 
-
-def test_pad_waves_starts_the_populated_waves_at_wave0():
-    """Mutation: delete the compaction comprehension from `pad_waves` -- `a` stays in `wave3`."""
-    a = {"stack": "stacks/a", "environment": "dev-eu"}
-    assert w.pad_waves([[], [], [], [a]]) == {**_EMPTY, "wave0": [a]}
-
-
-def test_pad_waves_keeps_the_level_order():
-    """Mutation: sort the compacted waves by stack name in `pad_waves` -- `a` moves to `wave0`."""
-    a = {"stack": "stacks/a", "environment": "dev-eu"}
-    b = {"stack": "stacks/b", "environment": "dev-eu"}
-    assert w.pad_waves([[b], [], [a]]) == {**_EMPTY, "wave0": [b], "wave1": [a]}
-
-
-def test_pad_waves_caps_the_populated_levels():
-    """Nine populated levels refuse; populated levels 0 and 9 apply in two waves.
-
-    Mutation: run the cap check before the compaction in `pad_waves` -- levels 0 and 9 refuse."""
-    with pytest.raises(SystemExit) as exc:
-        w.pad_waves([[f"cell{i}"] for i in range(w.MAX_WAVES + 1)])
-    assert str(exc.value) == (
-        "::error::change spans 9 populated dependency levels (> 8); split the PR."
-    )
-    assert w.pad_waves([["cell0"]] + [[] for _ in range(8)] + [["cell9"]]) == {
-        **_EMPTY,
-        "wave0": ["cell0"],
-        "wave1": ["cell9"],
-    }
-
-
-def test_env_level_waves_keeps_transitive_order_through_an_unchanged_stack():
-    """Only `a` and `c` of a -> b -> c are pending: `c` still applies a wave after `a`.
-
-    Mutation: compute the levels in `env_level_waves` over the pending cells' graph only
-    (`{s: deps[s] & pending_stacks}`) -- `c` lands in `wave0` beside `a`."""
+    Mutation: compute the waves in `stage_outputs` over the pending cells' graph only
+    (`{s: deps[s] & pending_stacks}`) -- `c` lands in `L0-W0` beside `a`."""
     a = {"stack": "stacks/a", "environment": "dev-eu"}
     c = {"stack": "stacks/c", "environment": "dev-eu"}
     deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}, "stacks/c": {"stacks/b"}}
-    out = w.env_level_waves([a, c], {}, deps)
-    assert out[0] == {**_EMPTY, "wave0": [a], "wave1": [c]}
-
-
-def test_pad_waves_ignores_empty_trailing_levels():
-    # A deep full graph with only low-level cells in the work set is fine: empty trailing levels
-    # beyond MAX_WAVES must not trip the guard.
-    waves = [["cell0"]] + [[] for _ in range(w.MAX_WAVES + 3)]
-    w.pad_waves(waves)  # must not raise
+    assert json.loads(w.stage_outputs({}, deps, [a, c])["keys"]) == ["L0-W0", "L0-W2"]
 
 
 def _linear_chain_dot(n):
@@ -177,19 +130,183 @@ def _linear_chain_dot(n):
     return "\n".join(lines + ["}"])
 
 
-def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
-    """The guard fires through a real caller, rather than dropping the level-8 cells into a
-    silent no-op apply.
+def _chain_cells(n, env="dev-eu"):
+    return [{"stack": f"stacks/s{i}", "environment": env} for i in range(1, n + 1)]
 
-    Mutation: delete the populated-level cap refusal from `pad_waves`."""
-    deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
-    pending = [{"stack": f"stacks/s{i}", "environment": "dev-eu"} for i in range(1, 10)]
 
+def test_stage_outputs_runs_an_eleven_wave_chain_in_eleven_stages():
+    """Eleven stack-waves, refused by the old eight-wave cap, run as stages `L0-W0`..`L0-W10`.
+
+    Mutation: `MATRIX_LIMIT = 8` in `waves` -- the chain refuses, red."""
+    out = w.stage_outputs({}, w.parse_dot(_linear_chain_dot(11)), _chain_cells(11))
+    assert json.loads(out["keys"]) == [f"L0-W{i}" for i in range(11)]
+
+
+def test_stage_outputs_orders_waves_numerically():
+    """`L0-W2` runs before `L0-W10`.
+
+    Mutation: sort the formatted keys instead of the (i, w) pairs -- `L0-W10` sorts first, red."""
+    deps = w.parse_dot(_linear_chain_dot(11))
+    cells = [
+        {"stack": "stacks/s3", "environment": "dev"},
+        {"stack": "stacks/s11", "environment": "dev"},
+    ]
+    assert json.loads(w.stage_outputs({}, deps, cells)["keys"]) == ["L0-W2", "L0-W10"]
+
+
+def test_stage_outputs_orders_env_levels_numerically():
+    """`L2` runs before `L10`.
+
+    Mutation: sort the formatted keys instead of the (i, w) pairs -- `L10-W0` sorts first, red."""
+    cells = [
+        {"stack": "stacks/app", "environment": "prod"},
+        {"stack": "stacks/app", "environment": "e2"},
+    ]
+    out = w.stage_outputs(_chain(10), {"stacks/app": set()}, cells)  # prod at 10, e2 at 2.
+    assert json.loads(out["keys"]) == ["L2-W0", "L10-W0"]
+
+
+def test_stage_outputs_keeps_a_key_when_the_pending_set_shrinks():
+    """A wave emptied by a shrinking pending set keeps the later stage's key.
+
+    Mutation: renumber the populated waves (`enumerate([w for w in waves if w])`) -- `s3`
+    reads `L0-W1`, red."""
+    deps = w.parse_dot(_linear_chain_dot(3))
+    cells = [
+        {"stack": "stacks/s1", "environment": "dev"},
+        {"stack": "stacks/s3", "environment": "dev"},
+    ]
+    assert json.loads(w.stage_outputs({}, deps, cells)["keys"]) == ["L0-W0", "L0-W2"]
+
+
+def test_stage_outputs_levels_a_cell_after_a_predecessor_env_with_no_pending_cell():
+    """`prod` needs `dev`, which has no pending cell: `prod` stays at env-level 1.
+
+    Mutation: compute the env levels over the pending envs only (drop every predecessor
+    outside them) -- `prod` reads `L0-W0`, red."""
+    cell = {"stack": "stacks/app", "environment": "prod"}
+    out = w.stage_outputs({"prod": ["dev"]}, {"stacks/app": set()}, [cell])
+    assert json.loads(out["keys"]) == ["L1-W0"]
+
+
+def test_stage_outputs_emits_every_output_whole():
+    """Two env-levels, the first with two stages. `levels[k]` is a JSON string of that level's
+    stage map; `first` is true once per level.
+
+    Mutations: emit each `levels` element as an object (no inner `json.dumps`) -- red;
+    `first` true only for `n == 0` -- red; `level` as the env-level `i` -- red."""
+    dns_eu = {"stack": "stacks/dns", "environment": "dev-eu", "workload": "x"}
+    app_eu = {"stack": "stacks/app", "environment": "dev-eu", "workload": "x"}
+    dns_us = {"stack": "stacks/dns", "environment": "dev-us", "workload": "x"}
+    deps = {"stacks/dns": set(), "stacks/app": {"stacks/dns"}}
+    out = w.stage_outputs({"dev-us": ["mid"], "mid": ["dev-eu"]}, deps, [dns_eu, app_eu, dns_us])
+    assert out == {
+        "levels": json.dumps(
+            [
+                json.dumps({"L0-W0": [dns_eu], "L0-W1": [app_eu]}),
+                json.dumps({"L2-W0": [dns_us]}),
+            ]
+        ),
+        "stages": json.dumps(
+            [
+                {"key": "L0-W0", "n": 0, "level": 0, "first": True},
+                {"key": "L0-W1", "n": 1, "level": 0, "first": False},
+                {"key": "L2-W0", "n": 2, "level": 1, "first": True},
+            ]
+        ),
+        "keys": '["L0-W0", "L0-W1", "L2-W0"]',
+        "counts": "[1, 1, 1]",
+        "cells": json.dumps(
+            [
+                {"stack": "stacks/dns", "environment": "dev-eu"},
+                {"stack": "stacks/app", "environment": "dev-eu"},
+                {"stack": "stacks/dns", "environment": "dev-us"},
+            ]
+        ),
+        "empty": False,
+    }
+
+
+def test_stage_outputs_of_no_cell_is_empty():
+    """Mutation: `"empty": False` -- red."""
+    assert w.stage_outputs({}, {"stacks/a": set()}, []) == {
+        "levels": "[]",
+        "stages": "[]",
+        "keys": "[]",
+        "counts": "[]",
+        "cells": "[]",
+        "empty": True,
+    }
+
+
+def test_stage_outputs_empty_order_is_a_single_level():
+    """A targeted apply passes an empty order, which puts every env at level 0.
+
+    Mutation: give every env level 1 when `order` is empty -- the key reads `L1-W0`."""
+    pending = [
+        {"stack": "stacks/dns", "environment": "dev-eu"},
+        {"stack": "stacks/dns", "environment": "dev-us"},
+    ]
+    out = w.stage_outputs({}, {"stacks/dns": set()}, pending)
+    assert json.loads(out["levels"]) == [json.dumps({"L0-W0": pending})]
+
+
+def test_stage_outputs_allows_256_stages_and_refuses_257():
+    """Mutations: `> 257` in the stage-count refusal -- 257 passes, red; `>= 256` -- 256
+    refuses, red."""
+    ok = w.stage_outputs({}, w.parse_dot(_linear_chain_dot(256)), _chain_cells(256))
+    assert len(json.loads(ok["keys"])) == 256
     with pytest.raises(SystemExit) as exc:
-        w.env_level_waves(pending, {}, deps)
-
+        w.stage_outputs({}, w.parse_dot(_linear_chain_dot(257)), _chain_cells(257))
     assert str(exc.value) == (
-        "::error::change spans 9 populated dependency levels (> 8); split the PR."
+        "::error::the apply spans 257 stages (> 256), one per populated env-level and "
+        "stack-wave pair; split the change."
+    )
+
+
+def test_stage_outputs_allows_a_256_cell_stage_and_refuses_257():
+    """Mutations: `> 257` in the per-stage refusal -- 257 passes, red; `>= 256` -- 256 refuses,
+    red."""
+
+    def cells(n):
+        return [{"stack": "stacks/app", "environment": f"e{i}"} for i in range(n)]
+
+    ok = w.stage_outputs({}, {"stacks/app": set()}, cells(256))
+    assert json.loads(ok["counts"]) == [256]
+    with pytest.raises(SystemExit) as exc:
+        w.stage_outputs({}, {"stacks/app": set()}, cells(257))
+    assert str(exc.value) == "::error::stage L0-W0 holds 257 cells (> 256); split the change."
+
+
+def _padded_level(size):
+    """One-cell `stage_outputs` input whose level string is exactly `size` bytes."""
+    cell = {"stack": "stacks/app", "environment": "dev", "pad": ""}
+    base = len(json.dumps({"L0-W0": [cell]}))
+    return [{**cell, "pad": "x" * (size - base)}]
+
+
+def test_stage_outputs_allows_a_128000_byte_level_and_refuses_128001():
+    """Mutations: drop the size check -- 128001 passes, red; `>=` -- 128000 refuses, red."""
+    ok = w.stage_outputs({}, {"stacks/app": set()}, _padded_level(128_000))
+    assert len(json.loads(ok["levels"])[0]) == 128_000
+    with pytest.raises(SystemExit) as exc:
+        w.stage_outputs({}, {"stacks/app": set()}, _padded_level(128_001))
+    assert str(exc.value) == (
+        "::error::env-level L0 holds 1 cells whose stage map is 128001 bytes (> 128000), past "
+        "what one environment variable carries; split the change across pull requests so each "
+        "env-level holds fewer cells."
+    )
+
+
+def test_refuse_oversized_level_counts_utf8_bytes_not_characters():
+    """64,001 characters, 128,002 UTF-8 bytes. `stage_outputs` escapes non-ASCII today, so this
+    pins the measure directly. Mutation: `len(text)` -- passes, red."""
+    with pytest.raises(SystemExit) as exc:
+        w.refuse_oversized_level("\xe9" * 64_001, 2, 7)
+    assert str(exc.value) == (
+        "::error::env-level L2 holds 7 cells whose stage map is 128002 bytes (> 128000), past "
+        "what one environment variable carries; split the change across pull requests so each "
+        "env-level holds fewer cells."
     )
 
 
@@ -302,43 +419,16 @@ def _chain(depth):
     return {envs[i]: [envs[i - 1]] for i in range(1, len(envs))}
 
 
-_EMPTY = {f"wave{i}": [] for i in range(8)}
-
-
-def test_env_level_waves_places_an_env_at_the_last_level_within_the_cap():
-    """Mutations: `lv >= MAX_ENV_LEVELS - 1` in `env_level_waves`' cap check -- the
-    deepest permitted level refuses; bucketing the cell into level 0 as well -- level 0's
-    `wave0` is no longer empty."""
-    cell = {"stack": "stacks/app", "environment": "prod"}
-    out = w.env_level_waves([cell], _chain(w.MAX_ENV_LEVELS - 1), {"stacks/app": set()})
-    assert out == [_EMPTY, _EMPTY, _EMPTY, {**_EMPTY, "wave0": [cell]}]
-
-
-def test_env_level_waves_refuses_an_env_beyond_the_cap():
-    """The guard is inside the shared function, so no caller can omit it and drop an
-    over-deep env's cells out of every `range(MAX_ENV_LEVELS)` bucket.
-
-    Mutation: delete the `if over:` refusal from `env_level_waves` -- the call returns
-    MAX_ENV_LEVELS empty wave dicts instead of raising.
-    """
-    with pytest.raises(SystemExit, match="env order spans"):
-        w.env_level_waves(
-            [{"stack": "stacks/app", "environment": "prod"}],
-            _chain(w.MAX_ENV_LEVELS),
-            {"stacks/app": set()},
-        )
-
-
-def test_env_level_waves_refuses_a_cyclic_stack_graph():
+def test_stage_outputs_refuses_a_cyclic_stack_graph():
     """deploy-detect and both apply-detect forms sort the stack graph only here.
 
-    Mutation: `levels` for `stack_levels` in `env_level_waves` -- a raw `CycleError`
+    Mutation: `levels` for `stack_levels` in `stage_outputs` -- a raw `CycleError`
     escapes instead of the `SystemExit`."""
     with pytest.raises(SystemExit) as exc:
-        w.env_level_waves(
-            [{"stack": "stacks/a", "environment": "prod"}],
+        w.stage_outputs(
             {},
             {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
+            [{"stack": "stacks/a", "environment": "prod"}],
         )
     assert str(exc.value) == (
         "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
@@ -347,64 +437,13 @@ def test_env_level_waves_refuses_a_cyclic_stack_graph():
     )
 
 
-def test_env_level_waves_buckets_and_orders():
-    """Cells are bucketed by their env's level, then stack-wave-ordered within each level.
-
-    Mutation: bucket on `env_level[...] == 0` -- the dev-us cells land at level 0 beside
-    dev-eu's."""
-    pending = [
-        {"stack": "stacks/dns", "environment": "dev-eu"},
-        {"stack": "stacks/app", "environment": "dev-eu"},
-        {"stack": "stacks/dns", "environment": "dev-us"},
-    ]
-    deps = {"stacks/dns": set(), "stacks/app": {"stacks/dns"}}
-    out = w.env_level_waves(pending, {"dev-us": ["dev-eu"]}, deps)
-    assert out[0]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-eu"}]
-    assert out[0]["wave1"] == [{"stack": "stacks/app", "environment": "dev-eu"}]
-    assert out[1]["wave0"] == [{"stack": "stacks/dns", "environment": "dev-us"}]
-    assert out[1]["wave1"] == []
-
-
-def test_env_level_waves_levels_the_cells_by_the_env_order():
-    """Mutation: compute the env levels in `env_level_waves` from `{}` instead of `order` --
-    dev-us lands at level 0 beside dev-eu, red."""
+def test_stage_outputs_levels_the_cells_by_the_env_order():
+    """Mutation: compute the env levels in `stage_outputs` from `{}` instead of `order` --
+    dev-us lands in `L0-W0` beside dev-eu, red."""
     eu = {"stack": "stacks/app", "environment": "dev-eu"}
     us = {"stack": "stacks/app", "environment": "dev-us"}
-    out = w.env_level_waves([eu, us], {"dev-us": ["dev-eu"]}, {"stacks/app": set()})
-    assert out == [{**_EMPTY, "wave0": [eu]}, {**_EMPTY, "wave0": [us]}, _EMPTY, _EMPTY]
-
-
-def test_env_level_waves_empty_order_is_a_single_level():
-    """A targeted apply passes an empty order, which puts every cell at level 0.
-
-    Mutation: in `env_level_waves`, give every env level 1 when `order` is empty -- the
-    cells land in level 1."""
-    pending = [
-        {"stack": "stacks/dns", "environment": "dev-eu"},
-        {"stack": "stacks/dns", "environment": "dev-us"},
-    ]
-    out = w.env_level_waves(pending, {}, {"stacks/dns": set()})
-    assert out == [{**_EMPTY, "wave0": pending}, _EMPTY, _EMPTY, _EMPTY]
-
-
-def test_env_level_outputs_emits_waves_and_empty_flags():
-    # The shared outputs: envlevelN_waves as JSON plus an envlevelN_empty bool per level, which
-    # `write_outputs` renders `true`/`false`. Single-sourced, so the three detects cannot drift
-    # apart on apply-env-level.yml's contract.
-    cell = {"stack": "s", "environment": "dev-eu"}
-    per_level = [
-        {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
-        {f"wave{i}": [] for i in range(8)},
-    ]
-    rest = (
-        '"wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []'
-    )
-    assert w.env_level_outputs(per_level) == {
-        "envlevel0_waves": '{"wave0": [{"stack": "s", "environment": "dev-eu"}], ' + rest + "}",
-        "envlevel0_empty": False,
-        "envlevel1_waves": '{"wave0": [], ' + rest + "}",
-        "envlevel1_empty": True,
-    }
+    out = w.stage_outputs({"dev-us": ["dev-eu"]}, {"stacks/app": set()}, [eu, us])
+    assert json.loads(out["levels"]) == [json.dumps({"L0-W0": [eu]}), json.dumps({"L1-W0": [us]})]
 
 
 def test_blocked_envs_direct_predecessor():

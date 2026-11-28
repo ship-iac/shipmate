@@ -1,24 +1,22 @@
 """Each pre-merge apply cell runs the pre-apply check, read-only and on every attempt: its pull
 request still holds the cell's lock and is open at the applied head, the base tip is the one
-detect read, the cell's newest plan record still names the wave row's plan run and digest, and,
-under the auto form, the plan run detect bound is still the head's newest autoplan. A wave can
-wait hours on an environment approval, and "Re-run failed jobs" re-runs a failed wave without
-its `detect` and `lock` jobs. The check follows only the App-key refusal in `cell.yml`'s `apply`,
-before the cloud credentials. The merge deploy passes the merged pull request (empty on a push) with
-`deploy` true and the job's check run id, and the check then refuses only a lock another pull
-request holds or, on a re-run, a cell an earlier attempt may have applied without saving its
-state. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
-reports a blocked reason: the check's own refusal. The reads use the `apply` job's GITHUB_TOKEN.
+detect read, the cell's newest plan record still names the stage row's plan run and digest,
+and, under the auto form, the plan run detect bound is still the head's newest autoplan. A stage
+can wait hours on an environment approval, and "Re-run failed jobs" re-runs a failed stage
+without its `detect` and `lock` jobs. The check follows only the App-key refusal in `cell.yml`'s
+`apply`, before the cloud credentials. The merge deploy passes the merged pull request (empty on
+a push) with `deploy` true and the job's check run id, and the check then refuses only a lock
+another pull request holds or, on a re-run, a cell an earlier attempt may have applied without
+saving its state. Its failure skips every step but apply-cell, which runs only to refuse, so the
+cell reports a blocked reason: the check's own refusal. The reads use the `apply` job's
+GITHUB_TOKEN.
 
-Whole parsed values against hand-written constants: the check's step, the wave steps that read
-its outcome, the cell's and the wave jobs' permissions, apply-cell's refusing step and the
-callers' permissions.
+Whole parsed values against hand-written constants: the check's step, the cell steps that read
+its outcome, the cell's and `stage.yml`'s `cell` job's permissions, apply-cell's refusing step and
+the callers' permissions.
 """
 
 from _loader import action_yaml, checkouts, secrets_refs, step_by, workflow_jobs
-
-WAVES = [f"wave{n}" for n in range(8)]
-LEVELS = [f"envlevel{n}" for n in range(4)]
 
 VERIFY_STEP = {
     "name": "Pre-apply check",
@@ -94,8 +92,8 @@ def test_the_cell_checks_first_and_refuses_through_apply_cell():
     apply-cell and the cell reports no blocked reason); drop its `!cancelled() &&`; pass
     `steps.pre-apply.conclusion`; drop the refusal input (the blocked reason names no cause);
     drop `contents: read`, `pull-requests: read` or `checks: read` from `cell.yml`'s `apply`
-    permissions, or from `wave5`'s, which cap it (a read 403s and every pre-merge cell
-    refuses)."""
+    permissions, or from `stage.yml`'s `cell`, which caps it (a read 403s and every pre-merge
+    cell refuses)."""
     apply = workflow_jobs("cell.yml")["apply"]
     steps = apply["steps"]
     (cell,) = [s for s in steps if str(s.get("uses", "")).endswith("apply-cell")]
@@ -115,8 +113,7 @@ def test_the_cell_checks_first_and_refuses_through_apply_cell():
         },
     )
     assert found == expected
-    jobs = workflow_jobs("apply-env-level.yml")
-    assert {w: jobs[w]["permissions"] for w in WAVES} == dict.fromkeys(WAVES, PERMISSIONS)
+    assert workflow_jobs("stage.yml")["cell"]["permissions"] == PERMISSIONS
 
 
 def test_the_cell_checks_out_the_head_without_persisting_the_token():
@@ -180,19 +177,16 @@ def test_apply_cell_hands_the_refusal_to_the_cell_summary():
     }
 
 
-def test_every_level_call_grants_what_the_wave_requests():
-    """A reusable workflow cannot exceed its caller's permissions, so a level missing one the
-    wave requests fails at load. The levels' `with:` blocks, the deploy's passing the merged
-    pull request with `deploy` true among them, are pinned whole by
-    `test_no_env_level_call_passes_a_cap`. Mutation: drop `pull-requests: read` from
-    `apply-run.yml`'s, then `deploy.yml`'s, level permissions."""
-    found = {
-        (workflow, lvl): workflow_jobs(workflow)[lvl]["permissions"]
-        for workflow in ("apply-run.yml", "deploy.yml")
-        for lvl in LEVELS
-    }
+def test_every_stage_call_grants_what_the_cell_requests():
+    """A reusable workflow cannot exceed its caller's permissions, so a call missing one the
+    cell requests fails at load. The `waves` calls' `with:` blocks, the deploy's passing the
+    merged pull request with `deploy` true among them, are pinned whole by
+    `test_no_stage_call_passes_a_cap`. Mutation: drop `pull-requests: read` from
+    `apply-run.yml`'s, then `deploy.yml`'s, `waves` permissions; from `waves.yml`'s `stage`."""
+    calls = [("apply-run.yml", "waves"), ("deploy.yml", "waves"), ("waves.yml", "stage")]
+    found = {(w, j): workflow_jobs(w)[j]["permissions"] for w, j in calls}
     assert found == dict.fromkeys(
-        [(w, lvl) for w in ("apply-run.yml", "deploy.yml") for lvl in LEVELS],
+        calls,
         {
             "contents": "read",
             "checks": "read",

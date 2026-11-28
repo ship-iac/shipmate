@@ -75,7 +75,7 @@ MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
 BLOCKS = {
     "apply-detect": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "apply-complete": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
-    "apply-release": "if __name__ == '__main__':\n    run_annotated(main, usage='apply-release')",
+    "apply-release": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "apply-run-check": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "apply-snapshot": (
         "if __name__ == '__main__':\n"
@@ -161,7 +161,7 @@ def test_every_script_prints_its_refusal_through_run_annotated(script):
             '{"name": "apply / dev / dns", "id": 1}\n',
             "::error::usage: apply-snapshot",
         ),
-        ("apply-release", "x", "", "::error::usage: apply-release"),
+        ("apply-release", "x", "", "::error::usage: apply-release guard|release"),
         ("dispatch-body", "--help", "", "::error::usage: dispatch-body"),
         (
             "patch-checks",

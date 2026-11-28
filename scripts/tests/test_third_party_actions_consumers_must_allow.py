@@ -40,7 +40,6 @@ THIRD_PARTY = {
 
 #: The engine workflows a consumer calls, hand-written.
 CALLABLE_WORKFLOWS = [
-    "apply-env-level.yml",
     "apply-run.yml",
     "apply.yml",
     "cell.yml",
@@ -49,7 +48,9 @@ CALLABLE_WORKFLOWS = [
     "drift.yml",
     "plan.yml",
     "release.yml",
+    "stage.yml",
     "unlock.yml",
+    "waves.yml",
 ]
 
 _ALLOWED_FENCE = re.compile(

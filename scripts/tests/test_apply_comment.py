@@ -9,7 +9,6 @@ from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
 ac = load_script("apply-comment")
-wv = load_script("waves")
 
 RUN_URL = "https://gh/run/1"
 
@@ -251,8 +250,8 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/app-eu"),
-        _job("apply / run / L0 / dev-eu / stacks/db / apply", "https://gh/job/db-eu"),
+        _job("apply / run / waves / L0-W0 / dev-eu / stacks/app / apply", "https://gh/job/app-eu"),
+        _job("apply / run / waves / L0-W0 / dev-eu / stacks/db / apply", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
@@ -314,8 +313,10 @@ def test_a_cell_whose_save_failed_its_check_write_reads_applied_and_its_successo
     dns, app = "apply / dev-eu / stacks/dns", "apply / dev-eu / stacks/app"
     ac.apply_check_state(rows, {dns, app}, {dns}, set())
     jobs = [
-        _job("apply / run / L0 / dev-eu / stacks/dns / apply", "https://gh/job/dns-apply"),
-        _job("apply / run / L0 / dev-eu / stacks/dns / save", "https://gh/job/dns-save"),
+        _job(
+            "apply / run / waves / L0-W0 / dev-eu / stacks/dns / apply", "https://gh/job/dns-apply"
+        ),
+        _job("apply / run / waves / L0-W0 / dev-eu / stacks/dns / save", "https://gh/job/dns-save"),
     ]
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "failure", head_sha=SHA)
     assert body == (
@@ -711,8 +712,8 @@ def test_a_held_cell_is_named_linked_to_its_save_job_and_holds_the_retry():
         _row(environment="prod", stack="stacks/dns", status="not_attempted", apply_text=None),
     ]
     jobs = [
-        _job("apply / run / L0 / dev-eu / @acme/db / apply", "https://gh/job/apply"),
-        _job("apply / run / L0 / dev-eu / @acme/db / save", "https://gh/job/save"),
+        _job("apply / run / waves / L0-W0 / dev-eu / @acme/db / apply", "https://gh/job/apply"),
+        _job("apply / run / waves / L0-W0 / dev-eu / @acme/db / save", "https://gh/job/save"),
     ]
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "success", head_sha=SHA)
     assert body.split("\n\n")[-2] == (
@@ -765,7 +766,7 @@ def test_an_applied_cell_with_a_held_check_is_never_not_recorded():
     `_state` -- red."""
     name = "apply / dev-eu / stacks/app"
     rows = ac.apply_check_state([_row()], {name}, set(), {name})
-    jobs = [_job("apply / run / L0 / dev-eu / stacks/app / save", "https://gh/job/save")]
+    jobs = [_job("apply / run / waves / L0-W0 / dev-eu / stacks/app / save", "https://gh/job/save")]
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], "dev-eu", "success", head_sha=SHA)
     assert body == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n#### dev-eu: 1 cell, 1 applied\n\n"
@@ -1035,7 +1036,10 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
             )
         )
         jobs.append(
-            _job(f"apply / run / L0 / {env} / {path} / apply", _JOB_URL.format(23456789000 + i))
+            _job(
+                f"apply / run / waves / L0-W0 / {env} / {path} / apply",
+                _JOB_URL.format(23456789000 + i),
+            )
         )
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], env, "failure", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
@@ -1085,7 +1089,10 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"apply / run / L0 / {e} / stacks/app / apply", _JOB_URL.format(23456789000 + i))
+        _job(
+            f"apply / run / waves / L0-W0 / {e} / stacks/app / apply",
+            _JOB_URL.format(23456789000 + i),
+        )
         for i, e in enumerate(envs)
     ]
     body = ac.build_comment(
@@ -1407,25 +1414,28 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/1")]
+    jobs = [_job("apply / run / waves / L0-W0 / dev-eu / stacks/app / apply", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("apply / run / L0 / dev-us / stacks/db / apply", "https://gh/job/1")]
+    jobs = [_job("apply / run / waves / L0-W0 / dev-us / stacks/db / apply", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    """A job named "apply / run / L0 / dev-eu / stacks/app / apply" must not match env `eu`'s
-    cell job "eu / stacks/app / apply" through a naive str.endswith; only a ` / `-boundary
-    suffix counts.
+    """A job named "apply / run / waves / L0-W0 / dev-eu / stacks/app / apply" must not match
+    env `eu`'s cell job "eu / stacks/app / apply" through a naive str.endswith; only a
+    ` / `-boundary suffix counts.
     Mutation: `apply-gate.cell_part`'s pattern becomes `.*<env> / <stack> / (apply|save)` --
     red."""
     row = _row(environment="eu", stack="stacks/app")
     jobs = [
-        _job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/should-not-match")
+        _job(
+            "apply / run / waves / L0-W0 / dev-eu / stacks/app / apply",
+            "https://gh/job/should-not-match",
+        )
     ]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
@@ -1778,7 +1788,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     `applied`) -- red."""
     snap = load_script("apply-snapshot")
     plan = {"plan_run_id": "5", "plan_sha256": "e" * 64}
-    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
+    waves = {"L0-W0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
     record = json.dumps({"plan_run": "5", "plan_sha256": "e" * 64})
     run = {
         "id": 7,
@@ -1792,42 +1802,50 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
-def test_every_env_level_job_is_named_for_its_level():
-    """`apply-gate.cell_part` requires the `L<n>` segment, so every env-level job of
-    `apply-run.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
-    up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
-    `level 0`."""
-    expected = {f"envlevel{n}": f"L{n}" for n in range(wv.MAX_ENV_LEVELS)}
-    for wf in ("apply-run.yml", "deploy.yml"):
-        jobs = workflow_yaml(wf)["jobs"]
-        names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}
-        assert names == expected, f"{wf}: {names}"
+def test_every_stage_job_is_named_for_the_cell_job_grammar():
+    """`apply-queue._cell_part` and `apply-complete`'s `unflip` read the callers' job id `waves`,
+    with no `name:` of its own, and `apply-gate.cell_part` reads `L<i>-W<w> / <env> / <stack> /
+    <part>`: `waves.yml`'s `stage` named by its stage key, `stage.yml`'s `cell` named
+    `<env> / <stack>` and its other jobs unnamed, compared whole.
+    Mutations: add `name: stages` to deploy.yml's `waves`; name `waves.yml`'s `stage`
+    `${{ matrix.n }}`; give `stage.yml`'s `entry` a `name:`."""
+    callers = {
+        wf: {j: v.get("name") for j, v in workflow_yaml(wf)["jobs"].items() if j == "waves"}
+        for wf in ("apply-run.yml", "deploy.yml")
+    }
+    assert callers == {"apply-run.yml": {"waves": None}, "deploy.yml": {"waves": None}}
+    stage = {j: v.get("name") for j, v in workflow_yaml("waves.yml")["jobs"].items()}
+    assert stage == {"stage": "${{ matrix.key }}"}
+    jobs = {j: v.get("name") for j, v in workflow_yaml("stage.yml")["jobs"].items()}
+    assert jobs == {
+        "entry": None,
+        "cell": "${{ matrix.environment }} / ${{ matrix.stack }}",
+        "complete": None,
+    }
 
 
 def test_wave_job_name_matches_the_cell_job_grammar():
     """Coupling: `_job_url` finds a cell's job by `apply-gate.cell_part`'s
-    `L<n> / <env> / <stack> / <part>`, whole or after a ` / ` boundary, which works only because
-    every wave job's `name:` renders `<env> / <stack>`, hands `cell.yml` the same matrix keys,
-    the env-level job holding it is named `L<n>`, and `cell.yml`'s job ids are `apply` and
-    `save` with no `name:` of their own. A rename downgrades every log link to the run URL.
+    `L<i>-W<w> / <env> / <stack> / <part>`, whole or after a ` / ` boundary, which works only
+    because `stage.yml`'s `cell` `name:` renders `<env> / <stack>`, hands `cell.yml` the same
+    matrix keys, and `cell.yml`'s job ids are `apply` and `save` with no `name:` of their own.
+    A rename downgrades every log link to the run URL.
 
-    Mutations: swap the two matrix keys on wave0's `name: &wave-name`; feed the wave's `stack:`
-    from another matrix key; rename `cell.yml`'s `apply` job to `run`; give it a `name:`;
-    rename deploy.yml's `name: L0` to `level 0`; link the `save` job from `_job_url` by
-    default -- red."""
-    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    waves = [f"wave{i}" for i in range(wv.MAX_WAVES)]
-    names = [jobs[w].get("name") for w in waves]
-    assert names == ["${{ matrix.environment }} / ${{ matrix.stack }}"] * wv.MAX_WAVES
-    wired = [(jobs[w]["with"]["stack"], jobs[w]["with"]["environment"]) for w in waves]
-    assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * wv.MAX_WAVES
+    Mutations: swap the two matrix keys on `cell`'s `name:`; feed its `stack:` from another
+    matrix key; rename `cell.yml`'s `apply` job to `run`; give it a `name:`; link the `save`
+    job from `_job_url` by default -- red."""
+    job = workflow_yaml("stage.yml")["jobs"]["cell"]
+    assert job["name"] == "${{ matrix.environment }} / ${{ matrix.stack }}"
+    assert (job["with"]["stack"], job["with"]["environment"]) == (
+        "${{ matrix.stack }}",
+        "${{ matrix.environment }}",
+    )
     cell = workflow_yaml("cell.yml")["jobs"]
     assert [j.get("name") for j in cell.values()] == [None] * len(cell)
-    # Built from the sources: deploy.yml's level name and cell.yml's job ids.
-    level = workflow_yaml("deploy.yml")["jobs"]["envlevel0"]["name"]
+    # Built from the sources: cell.yml's job ids.
     row = _row(environment="dev-eu", stack="stacks/app")
     listed = [
-        _job(f"deploy / {level} / dev-eu / stacks/app / {p}", f"https://gh/{p}") for p in cell
+        _job(f"deploy / waves / L0-W2 / dev-eu / stacks/app / {p}", f"https://gh/{p}") for p in cell
     ]
     assert {p: ac._job_url(row, listed, RUN_URL, p) for p in cell} == {
         "apply": "https://gh/apply",
@@ -1835,8 +1853,8 @@ def test_wave_job_name_matches_the_cell_job_grammar():
     }
     # The literal case: a cell's log link is its `apply` job.
     literal = [
-        _job("deploy / L0 / dev-eu / stacks/app / save", "https://gh/job/2"),
-        _job("deploy / L0 / dev-eu / stacks/app / apply", "https://gh/job/1"),
+        _job("deploy / waves / L0-W0 / dev-eu / stacks/app / save", "https://gh/job/2"),
+        _job("deploy / waves / L0-W0 / dev-eu / stacks/app / apply", "https://gh/job/1"),
     ]
     assert ac._job_url(row, literal, RUN_URL) == "https://gh/job/1"
 
@@ -1848,14 +1866,12 @@ def _set_report(monkeypatch, tmp_path, report):
     monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
 
 
-def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
-    """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it: `waves_json`
-    in env-level 0, the other levels and every env set empty."""
+def _main_env(monkeypatch, tmp_path, cells_dir, cells_json, checks_path):
+    """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it:
+    `cells_json` as the detect's `cells`."""
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
-    monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
-    for i in range(1, wv.MAX_ENV_LEVELS):
-        monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    monkeypatch.setenv("SHIPMATE_CELLS", cells_json)
     _set_report(monkeypatch, tmp_path, {})
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
@@ -2044,8 +2060,8 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
         ),
         encoding="utf-8",
     )
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟠 1 not recorded {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 not recorded\n\n"
@@ -2065,8 +2081,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
     cells.mkdir()
     checks = tmp_path / "checks.jsonl"
     checks.write_text("\n".join(_jsonl(_check("apply / dev-eu / stacks/app"))), encoding="utf-8")
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 applied\n\n"
@@ -2081,8 +2097,8 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     Mutation: treat an absent check name as pending in `apply_check_state` -- red."""
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 1 cell, 1 applied\n\n"
@@ -2090,21 +2106,20 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     )
 
 
-def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
-    """A targeted apply's expected cells arrive in env-level 0, the slot `apply-run.yml` fills from
-    `apply-detect`. `stacks/db` has no artifact, so only the expected-cell set can name it.
+def test_main_renders_the_expected_cells_from_the_cells_input(monkeypatch, tmp_path):
+    """The expected cells arrive in `SHIPMATE_CELLS`, the detect's `cells` output. `stacks/db`
+    has no artifact, so only the expected-cell set can name it.
 
-    Mutation: read the expected cells from `range(1, MAX_ENV_LEVELS)` in `_expected_cells` --
-    the db row and its note are gone, red."""
+    Mutation: return `set()` from `_expected_cells` -- the db row and its note are gone, red."""
     cells = tmp_path / "cells"
     _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
-    waves = json.dumps(
-        {
-            "wave0": [{"stack": "stacks/app", "environment": "dev-eu"}],
-            "wave1": [{"stack": "stacks/db", "environment": "dev-eu"}],
-        }
+    expected = json.dumps(
+        [
+            {"stack": "stacks/app", "environment": "dev-eu"},
+            {"stack": "stacks/db", "environment": "dev-eu"},
+        ]
     )
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟡 1 not attempted, 1 applied {_MAIN_AT}\n\n"
         "#### dev-eu: 2 cells, 1 not attempted, 1 applied\n\n"
@@ -2122,15 +2137,13 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
     name, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    waves = json.dumps(
-        {
-            "wave0": [
-                {"stack": "stacks/app", "environment": "live"},
-                {"stack": "stacks/app", "environment": "staging"},
-            ]
-        }
+    expected = json.dumps(
+        [
+            {"stack": "stacks/app", "environment": "live"},
+            {"stack": "stacks/app", "environment": "staging"},
+        ]
     )
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     _set_report(monkeypatch, tmp_path, {"env_order": ["staging", "live"]})
     body = _main_body(tmp_path)
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
@@ -2308,7 +2321,10 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
     targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"apply / run / L0 / {e} / stacks/app / apply", _JOB_URL.format(23456789000 + i))
+        _job(
+            f"apply / run / waves / L0-W0 / {e} / stacks/app / apply",
+            _JOB_URL.format(23456789000 + i),
+        )
         for i, e in enumerate(envs)
     ]
     waiting = [
@@ -2517,6 +2533,44 @@ def test_a_long_detect_refusal_is_cut_at_the_reason_cap():
     )
 
 
+@pytest.mark.parametrize("unset", [True, False], ids=["absent", "empty"])
+def test_main_renders_a_failed_detects_refusal_without_cells(monkeypatch, tmp_path, unset):
+    """A failed detect writes no `cells`, so the render step reads none and still replies:
+    `apply-run.yml` feeds the never-written output as `""`.
+
+    Mutations: `cell_names` the empty string in `_expected_cells` (no empty short-circuit) --
+    the render refuses, red; short-circuit only an absent `SHIPMATE_CELLS` -- red for `empty`."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    if unset:
+        monkeypatch.delenv("SHIPMATE_CELLS")
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,failure,skipped")
+    monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", _REFUSAL)
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {_MAIN_AT}\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+@pytest.mark.parametrize("raw", ["nope", '{"L0-W0": []}', '[{"stack": 1}]'])
+def test_main_refuses_malformed_cells(monkeypatch, tmp_path, raw):
+    """Mutation: return `set()` for a `None` from `cell_names` in `_expected_cells` -- the
+    render goes on, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, raw, str(tmp_path / "absent.jsonl"))
+    with pytest.raises(SystemExit) as exc:
+        ac.main()
+    assert exc.value.code == (
+        "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+    )
+
+
 def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, tmp_path):
     """Mutation: drop the `SHIPMATE_DETECT_REFUSAL` argument from `main`'s `build_comment` call
     -- no fence, red."""
@@ -2689,7 +2743,7 @@ _LOCK_REFUSAL = (
 def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_applying(
     monkeypatch, tmp_path, flag, word
 ):
-    """A refused lock job follows a detect that succeeded: its waves name the cells, which read
+    """A refused lock job follows a detect that succeeded: its `cells` name the cells, which read
     not attempted, and the refusal sits in the detect refusal's fence under the verdict, which
     reads refused when `SHIPMATE_REFUSED_BY_RULE` is `true`.
 
@@ -2697,8 +2751,8 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
     Mutation: drop the `SHIPMATE_REFUSED_BY_RULE` read from `main` -- the flagged case, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
-    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    expected = json.dumps([{"stack": "stacks/app", "environment": "dev-eu"}])
+    _main_env(monkeypatch, tmp_path, cells, expected, str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_RESULTS", "success,success,success,failure,skipped")
     monkeypatch.setenv("SHIPMATE_LOCK_REFUSAL", _LOCK_REFUSAL)
     if flag:
@@ -3113,7 +3167,7 @@ def test_a_behind_refusal_renders_its_line_from_the_report_above_the_fence(
     Mutation: read a report key with `report[k]` -- the missing fields raise, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
-    _main_env(monkeypatch, tmp_path, cells, json.dumps({"wave0": []}), str(tmp_path / "none"))
+    _main_env(monkeypatch, tmp_path, cells, "[]", str(tmp_path / "none"))
     _set_report(monkeypatch, tmp_path, {"behind": _BEHIND_CELLS, "base": "release/2"})
     monkeypatch.setenv("SHIPMATE_RESULTS", "failure")
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")

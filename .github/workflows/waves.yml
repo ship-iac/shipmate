@@ -1,0 +1,70 @@
+name: waves
+on:
+  workflow_call:
+    inputs:
+      # detect's `stages`, `levels`, `keys` and `counts` outputs, unparsed.
+      stages: { required: true, type: string }
+      levels: { required: true, type: string }
+      keys: { required: true, type: string }
+      counts: { required: true, type: string }
+      head_sha: { required: true, type: string }
+      runs_on: { required: true, type: string }
+      # The version pair the caller's detect job resolved; every cell installs exactly it.
+      tools: { required: true, type: string }
+      # On apply, each cell refuses unless this pull request holds its lock. With `deploy` (the
+      # merge deploy) it is the merged pull request, empty on a push, and each cell refuses only
+      # a lock another pull request holds.
+      pr_number: { required: false, type: string, default: "" }
+      # `base_sha` is the base tip detect read, which every pre-merge pre-apply check compares;
+      # `auto` marks an auto apply, whose check also compares `provenance_run`, detect's plan run.
+      auto: { required: false, type: boolean, default: false }
+      provenance_run: { required: false, type: string, default: "" }
+      base_sha: { required: false, type: string, default: "" }
+      deploy: { required: false, type: boolean, default: false }
+      # The first level's check ids, which the caller already snapshotted, with its first stage
+      # already released. Empty: every level's first stage snapshots its own.
+      by_wave: { required: false, type: string, default: "" }
+    secrets:
+      SHIPMATE_ENCRYPTION_KEY:
+        required: false
+      SHIPMATE_APP_PRIVATE_KEY:
+        required: false
+      SHIPMATE_SECRETS:
+        required: false
+# Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
+# id-token: write.
+permissions: {}
+jobs:
+  # One leg per populated stage, one at a time in run order; a failed leg stops the later ones.
+  # `apply-gate.cell_part` matches the leg's `L<i>-W<w>` name, so it is load-bearing: renaming
+  # it strands apply checks pending.
+  stage:
+    name: ${{ matrix.key }}
+    uses: ./.github/workflows/stage.yml
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(inputs.stages) }}
+    with:
+      level_waves: ${{ fromJSON(inputs.levels)[matrix.level] }}
+      key: ${{ matrix.key }}
+      n: ${{ matrix.n }}
+      first: ${{ matrix.first }}
+      keys: ${{ inputs.keys }}
+      counts: ${{ inputs.counts }}
+      by_wave: ${{ matrix.level == 0 && inputs.by_wave || '' }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+    # Named, never `inherit`: see the `waves` job in apply-run.yml.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}

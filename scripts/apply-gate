@@ -50,6 +50,10 @@ APPLY_PREFIX = "apply / "
 #: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "plan / "
+#: A stage's job name segment, `L<env level>-W<wave>`, under which its cell and stage jobs run.
+STAGE = r"L[0-9]+-W[0-9]+"
+#: `stage.yml`'s `cell` job name before GitHub expands its matrix.
+UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 #: The most cell names a refusal lists before eliding the rest.
 NAMED = 10
 DONE_CONCLUSIONS = {"success", "neutral"}
@@ -86,7 +90,7 @@ def parse_check_name(name):
 
 def cell_job_name(stack, env):
     """A cell job's own name, `<env> / <stack>`, as `plan.yml`, `drift.yml` and
-    `apply-env-level.yml` declare it. GitHub prefixes each caller level's job name."""
+    `stage.yml` declare it. GitHub prefixes each caller level's job name."""
     return f"{env} / {stack}"
 
 
@@ -97,26 +101,42 @@ def plan_check_name(stack, env):
 
 def cell_part(job_name, stack, env):
     """`"apply"` or `"save"` when the listed job `job_name` is that job of the cell's
-    `cell.yml`, `L<n> / <env> / <stack> / <part>` (`apply-run.yml` and `deploy.yml` name their
-    env-level jobs `L<n>`), whole or after a ` / ` boundary, since the calling jobs prepend their
-    own names; else None. The `L<n>` segment keeps out any other job ending in the cell's name,
-    and the boundary keeps env `eu` from matching a job of env `dev-eu`."""
-    pattern = rf"(?:.* / )?L[0-9]+ / {re.escape(cell_job_name(stack, env))} / (apply|save)"
+    `cell.yml`, `<stage> / <env> / <stack> / <part>` (`waves.yml` names each stage `STAGE`),
+    whole or after a ` / ` boundary, since the calling jobs prepend their own names; else None.
+    The stage segment keeps out any other job ending in the cell's name, and the boundary keeps
+    env `eu` from matching a job of env `dev-eu`."""
+    pattern = rf"(?:.* / )?{STAGE} / {re.escape(cell_job_name(stack, env))} / (apply|save)"
     match = re.fullmatch(pattern, job_name)
     return match.group(1) if match else None
 
 
 def level_of(jobs, job_id):
-    """The level of the listed job `job_id`, its name up to the `L<n>` segment (`apply / run /
-    L0`): for a cell job, `<level> / <env> / <stack> / <part>`, or a job directly under the
-    level. "" when `jobs` does not list it or its name has neither shape."""
+    """The stage of the listed job `job_id`, its name up to the `STAGE` segment (`apply / run /
+    waves / L0-W2`): for a cell job, `<stage> / <env> / <stack> / <part>`, or a job directly
+    under the stage. The segment sits at a fixed position from the end, so a caller named like a
+    stage cannot shift it. "" when `jobs` does not list it or its name has neither shape."""
     own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
     segments = own.split(" / ")
     cell = len(segments) >= 4 and segments[-1] in ("apply", "save")
-    depth = 4 if cell and re.fullmatch(r"L[0-9]+", segments[-4]) else 2
-    if len(segments) < depth or not re.fullmatch(r"L[0-9]+", segments[-depth]):
+    depth = 4 if cell and re.fullmatch(STAGE, segments[-4]) else 2
+    if len(segments) < depth or not re.fullmatch(STAGE, segments[-depth]):
         return ""
     return " / ".join(segments[: 1 - depth])
+
+
+def stage_prefix(level):
+    """The name before the stage segment of `level`, a `level_of` result (`apply / run / waves /
+    L0-W2` -> `apply / run / waves`); "" when its last segment is not `STAGE` or nothing
+    precedes it."""
+    prefix, _, stage = level.rpartition(" / ")
+    return prefix if re.fullmatch(STAGE, stage) else ""
+
+
+def unexpanded_rows(jobs, level):
+    """The listed jobs of `jobs` named `<level> / UNEXPANDED`, stage `level`'s cell matrix
+    row as GitHub lists it when the matrix never expanded; none when `level` is empty."""
+    name = f"{level} / {UNEXPANDED}"
+    return [j for j in jobs if level and j.get("name") == name]
 
 
 def cell_rows(jobs, level, stack, env):
@@ -128,6 +148,20 @@ def cell_rows(jobs, level, stack, env):
         name = f"{level} / {cell_job_name(stack, env)} / {part}"
         if level and cell_part(name, stack, env) == part:
             rows[part] = [j for j in jobs if j.get("name") == name]
+    return rows
+
+
+def cell_rows_any_stage(jobs, prefix, stack, env):
+    """`{"apply": [...], "save": [...]}`: the listed jobs of `jobs` named
+    `<prefix> / <any STAGE> / <env> / <stack> / <part>`, `prefix` from `stage_prefix`. A cell
+    runs in one stage per attempt and may run in another on a later one. Both empty when
+    `prefix` is empty."""
+    rows = {"apply": [], "save": []}
+    cell = re.escape(cell_job_name(stack, env))
+    for part in rows:
+        pattern = rf"{re.escape(prefix)} / {STAGE} / {cell} / {part}"
+        if prefix:
+            rows[part] = [j for j in jobs if re.fullmatch(pattern, j.get("name", ""))]
     return rows
 
 

@@ -10,7 +10,7 @@ from _loader import ENGINE_ENVIRONMENT, workflow_jobs
 
 #: The whole job, hand-written: a value read back from the workflow passes whatever it says.
 EXPECTED_SUMMARY = {
-    "needs": ["detect", "envlevel0", "envlevel1", "envlevel2", "envlevel3"],
+    "needs": ["detect", "waves"],
     "if": "always()",
     "runs-on": "ubuntu-slim",
     "concurrency": {

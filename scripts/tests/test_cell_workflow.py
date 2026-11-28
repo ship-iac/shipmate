@@ -1,13 +1,13 @@
-"""`cell.yml`, the called workflow that runs one wave cell, and the eight wave jobs that call it.
+"""`cell.yml`, the called workflow that runs one cell, and `stage.yml`'s `cell` job that calls it.
 
 Threat model: an accidental edit that (a) lets the job that runs pull-request code write the
 state entry or hold the App key, or the job that writes the state run pull-request code;
 (b) skips `save` after an `apply` that may have changed the state; (c) feeds `save` another
-value than the `apply` job's state output or job id; (d) lets one wave pass the cell another
+value than the `apply` job's state output or job id; (d) lets the stage pass the cell another
 row's environment or stack, which the concurrency group and the steps read, or another value
-than the level's unparsed `by_wave`; (e) lets `save` write the check before its state step
-succeeded, or after an `apply` that did not succeed. Whole parsed values against hand-written
-constants.
+than the unparsed `by_wave`, or runs the cells after a refused or cancelled `entry`; (e) lets
+`save` write the check before its state step succeeded, or after an `apply` that did not
+succeed. Whole parsed values against hand-written constants.
 """
 
 import re
@@ -15,8 +15,6 @@ import re
 from _loader import load_script, local_action, workflow_jobs
 
 ag = load_script("apply-gate")
-
-WAVES = [f"wave{n}" for n in range(8)]
 
 CELL_WITH = {
     "cell": "${{ toJSON(matrix) }}",
@@ -31,7 +29,7 @@ CELL_WITH = {
     "base_sha": "${{ inputs.base_sha }}",
     "deploy": "${{ inputs.deploy }}",
     # Unparsed: an expression lookup ignores case, so `save` matches the check name exactly.
-    "by_wave": "${{ inputs.by_wave || needs.snapshot.outputs.by_wave }}",
+    "by_wave": "${{ inputs.by_wave || needs.entry.outputs.by_wave }}",
 }
 #: The App key passes through: with an empty literal, `save` did not receive shipmate-engine's key
 #: (sample run 45911273841).
@@ -40,10 +38,31 @@ CELL_SECRETS = {
     "SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}",
     "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
 }
-#: The keys of a calling wave job. GitHub refuses `runs-on` and `environment` on a job that calls
-#: a workflow; a repeated `concurrency` group fails the call at once; a `cache-mode: read` there
-#: fails `save` at startup.
-WAVE_KEYS = {"needs", "if", "uses", "permissions", "strategy", "name", "with", "secrets"}
+#: `stage.yml`'s whole `cell` job. A calling job takes no `runs-on`, `environment`, `concurrency`
+#: or `cache-mode`. The cells run once `entry` released the stage, or, `entry` skipped, once the
+#: caller released it and passed `by_wave`.
+CELL_JOB = {
+    "needs": ["entry"],
+    "if": (
+        "${{ !cancelled() && (needs.entry.result == 'success' || "
+        "needs.entry.result == 'skipped' && inputs.by_wave != '') }}"
+    ),
+    "uses": "./.github/workflows/cell.yml",
+    "permissions": {
+        "contents": "read",
+        "actions": "read",
+        "checks": "read",
+        "pull-requests": "read",
+        "id-token": "write",
+    },
+    "strategy": {
+        "fail-fast": False,
+        "matrix": {"include": "${{ fromJSON(inputs.level_waves)[inputs.key] }}"},
+    },
+    "name": "${{ matrix.environment }} / ${{ matrix.stack }}",
+    "with": CELL_WITH,
+    "secrets": CELL_SECRETS,
+}
 
 SAVE = {
     "needs": ["apply"],
@@ -109,16 +128,13 @@ APPLY_ORDER = [
 ]
 
 
-def test_every_wave_calls_the_cell_with_one_block():
-    """Mutations: `stack: ${{ matrix.environment }}` on `wave3`; add `cache-mode: read` to
-    `wave0`; `by_wave: ${{ toJSON(fromJSON(inputs.by_wave || needs.snapshot.outputs.by_wave)) }}`
-    on `wave2` (re-serializing merges names differing only in case);
-    the empty literal `""` for the App key in the shared secrets block, which left `save` without
-    the key in sample run 45911273841."""
-    jobs = workflow_jobs("apply-env-level.yml")
-    found = {w: (set(jobs[w]), jobs[w]["uses"], jobs[w]["with"], jobs[w]["secrets"]) for w in WAVES}
-    expected = (WAVE_KEYS, "./.github/workflows/cell.yml", CELL_WITH, CELL_SECRETS)
-    assert found == dict.fromkeys(WAVES, expected)
+def test_the_stage_calls_the_cell_with_one_block():
+    """Mutations: `stack: ${{ matrix.environment }}`; add `cache-mode: read` to `cell`;
+    `by_wave: ${{ toJSON(fromJSON(inputs.by_wave || needs.entry.outputs.by_wave)) }}`
+    (re-serializing merges names differing only in case); the empty literal `""` for the App
+    key, which left `save` without the key in sample run 45911273841; drop `!cancelled() &&`
+    from `if:`; `'failure'` for `'skipped'` in it; drop `&& inputs.by_wave != ''` from it."""
+    assert workflow_jobs("stage.yml")["cell"] == CELL_JOB
 
 
 def test_the_save_job_is_whole():

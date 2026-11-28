@@ -5,17 +5,16 @@ Each count is derived from the reusable engine workflows in `.github/workflows/`
 `on` holds `workflow_call`, so the repository's own CI does not count: a job runs on
 `ubuntu-slim` when its `runs-on` is exactly that label, and binds `shipmate-engine` when its
 `environment` names it, as a string or as a mapping's `name`. Each list's backticked job ids,
-`wave<i>-<x>` … `wave<j>-<x>` expanded and workflow file names dropped, must equal the derived job
-ids as a multiset; which workflow a job sits under is not checked. Threat model: a job added,
-moved or relabelled without the prose following it.
+workflow file names dropped, must equal the derived job ids as a multiset; which workflow a job
+sits under is not checked. Threat model: a job added, moved or relabelled without the prose
+following it.
 
-Mutations, each red: `twenty-six` to `twenty-five` at each of `CONTRACT.md`'s two sites,
-`docs/aws.md`'s two sites and `docs/getting-started.md`'s; `twenty-nine` to `twenty-eight` in
-`docs/troubleshooting.md`; `wave7-release` to `wave6-release` in each list; drop `save` from
-`docs/troubleshooting.md`'s list; expand only
-`wave0-<x>` … `wave7-<x>` in `_listed`; drop `and `result`` from the `unlock.yml` entry of the
-`CONTRACT.md` and `docs/aws.md` lists; drop `and `replan`` from `docs/troubleshooting.md`'s list;
-drop `unflip` from the `apply-run.yml` entry of each list; with `ci.yml`'s job moved to
+Mutations, each red: `eighteen` to `seventeen` at each of `CONTRACT.md`'s two sites,
+`docs/aws.md`'s two sites and `docs/getting-started.md`'s; `twenty-one` to `twenty` in
+`docs/troubleshooting.md`; drop `entry` from each list; drop `save` from
+`docs/troubleshooting.md`'s list; drop `and `result`` from the `unlock.yml` entry of the
+`CONTRACT.md` and `docs/aws.md` lists; drop `unflip` from the `apply-run.yml` entry of each
+list; count `waves`, which has no `runs-on`, as slim; with `ci.yml`'s job moved to
 `ubuntu-slim`, drop the `workflow_call` filter.
 """
 
@@ -26,10 +25,13 @@ import pytest
 from _loader import ENGINE, WORKFLOWS, workflow_yaml
 
 _ONES = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+_TEENS = ["thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
 _TENS = {2: "twenty", 3: "thirty", 4: "forty"}
 
 
 def _words(n):
+    if 13 <= n <= 19:
+        return _TEENS[n - 13]
     tens, ones = divmod(n, 10)
     return _TENS[tens] + (f"-{_ONES[ones - 1]}" if ones else "")
 
@@ -56,8 +58,8 @@ ENGINE_BOUND = _jobs(_binds_engine)
 
 def test_the_derived_counts_are_the_documented_ones():
     """The counts the prose states, hand-written. Mutation: count every workflow with
-    `ci.yml`'s job on `ubuntu-slim` -- 27, red."""
-    assert (len(SLIM), len(ENGINE_BOUND)) == (26, 29)
+    `ci.yml`'s job on `ubuntu-slim` -- 19, red."""
+    assert (len(SLIM), len(ENGINE_BOUND)) == (18, 21)
 
 
 def _doc(name):
@@ -65,12 +67,7 @@ def _doc(name):
 
 
 def _listed(text):
-    """The job ids `text` names in backticks, ranges expanded, workflow file names dropped."""
-    text = re.sub(
-        r"`wave(\d)-([a-z]+)` … `wave(\d)-\2`",
-        lambda m: ", ".join(f"`wave{n}-{m[2]}`" for n in range(int(m[1]), int(m[3]) + 1)),
-        text,
-    )
+    """The job ids `text` names in backticks, workflow file names dropped."""
     return collections.Counter(t for t in re.findall(r"`([^`]+)`", text) if not t.endswith(".yml"))
 
 

@@ -12,10 +12,9 @@ Invariants:
   `A && B || C` as `C` whenever `B` is falsy, so `matrix.role_arn || vars.AWS_ROLE_ARN` mints
   real credentials from a branch-editable value for exactly the cell the table declined to give
   a role. The jobs may read repository variables elsewhere, and this says nothing about those;
-- cell.yml's `apply`, and every wave job in apply-env-level.yml that calls it, carries
-  id-token: write;
-- apply-env-level's snapshot, release and complete jobs declare exactly the scopes they need.
-  None gets id-token: none touches the cloud, and each holds the App key.
+- cell.yml's `apply`, and stage.yml's `cell` job that calls it, carries id-token: write;
+- stage.yml's `entry` and `complete` jobs declare exactly the scopes they need. Neither gets
+  id-token: neither touches the cloud, and each holds the App key.
 
 Whole parsed values, never substrings. An inverted gate must fail here.
 """
@@ -31,7 +30,6 @@ ROLE_TO_ASSUME = "${{ matrix.role_arn }}"
 AWS_REGION = "${{ matrix.cred_region }}"
 #: `cell.yml` reads the row from its `cell` input; only the row's spelling differs.
 CALLED_ROW = "fromJSON(inputs.cell)"
-WAVES = [f"wave{i}" for i in range(8)]
 #: (workflow, cell-running job ids, cell action) -- the four files that must agree. unlock.yml
 #: carries the same step doing the same job; leaving it out is how byte-identity stops being true.
 CELL_JOBS = [
@@ -54,30 +52,25 @@ def _cell_jobs(workflow, job_ids):
 
 
 def test_every_apply_job_grants_id_token_write():
-    """Mutation: drop `id-token: write` from `cell.yml`'s `apply`."""
-    jobs = {**_cell_jobs("apply-env-level.yml", WAVES), **_cell_jobs("cell.yml", ["apply"])}
+    """Mutations: drop `id-token: write` from `cell.yml`'s `apply`; from `stage.yml`'s `cell`."""
+    jobs = {**_cell_jobs("stage.yml", ["cell"]), **_cell_jobs("cell.yml", ["apply"])}
     for name, job in jobs.items():
         perms = job.get("permissions") or {}
         assert perms.get("id-token") == "write", f"{name}: permissions must include id-token: write"
 
 
-def test_snapshot_and_completion_jobs_get_exactly_their_declared_permissions():
-    """Mutations: drop `checks: read` from `complete`'s permissions; add `checks: write` to
-    `wave2-release`'s."""
+def test_entry_and_complete_get_exactly_their_declared_permissions():
+    """Mutations: drop `checks: read` from `complete`'s permissions; add `id-token: write` to
+    `entry`'s."""
     # Whole-mapping comparison, not `id-token is None`: the realistic break is the block being
     # deleted, and an absent block is not an absent scope. The job then inherits the caller's
     # grants, or, with the workflow-level floor, nothing.
-    expected = {
-        "snapshot": {"checks": "read", "actions": "read"},
-        **{f"wave{n}-release": {"actions": "read"} for n in range(8)},
+    jobs = workflow_yaml("stage.yml")["jobs"]
+    found = {name: jobs[name].get("permissions") for name in ("entry", "complete")}
+    assert found == {
+        "entry": {"actions": "read", "checks": "read"},
         "complete": {"actions": "read", "checks": "read"},
-    }
-    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    for name, perms in expected.items():
-        assert jobs[name].get("permissions") == perms, (
-            f"{name} must declare exactly {perms} -- it never touches the cloud, "
-            "and the completion jobs hold the App private key"
-        )
+    }, "entry and complete never touch the cloud, and both hold the App private key"
 
 
 @pytest.mark.parametrize(
@@ -85,7 +78,7 @@ def test_snapshot_and_completion_jobs_get_exactly_their_declared_permissions():
 )
 def test_every_cell_job_has_exactly_one_gated_cred_step_before_its_cell(workflow, job_ids, action):
     """The same three hand-written constants for all four files, never one per file: a plan,
-    drift or unlock cell that resolves the role differently from a wave job is the defect this
+    drift or unlock cell that resolves the role differently from an apply cell is the defect this
     catches, and a per-file constant would follow the divergence instead of failing on it.
 
     Mutations, each reddening only its own case: a `|| vars.AWS_ROLE_ARN` fallback added to
@@ -107,7 +100,7 @@ def test_every_cell_job_has_exactly_one_gated_cred_step_before_its_cell(workflow
         assert cred.get("if") == cred_if, (
             f"{where}: credentials step must be gated on the role the table resolved"
         )
-        # The whole mapping, not two keys: a wave step gaining a wrong third input is pinned
+        # The whole mapping, not two keys: a cell step gaining a wrong third input is pinned
         # nowhere else.
         assert cred["with"] == {"role-to-assume": role, "aws-region": region}, where
         cell_idx = [i for i, s in enumerate(steps) if _is_cell(s, action)]

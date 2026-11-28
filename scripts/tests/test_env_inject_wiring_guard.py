@@ -83,7 +83,7 @@ def test_the_registry_names_every_job_that_runs_a_cell():
     """Both sides derived: the registry against the workflows themselves. Without this the other
     guards only check the jobs someone remembered to list.
 
-    Mutation: drop `unlock.yml` from `_CELL_JOBS`, or add `apply-env-level.yml`'s `wave0`.
+    Mutation: drop `unlock.yml` from `_CELL_JOBS`, or add `stage.yml`'s `cell`.
     """
     found = set()
     for path in sorted(WORKFLOWS.glob("*.yml")):

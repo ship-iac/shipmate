@@ -1,11 +1,11 @@
 name: shipmate apply-snapshot
-description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies, and slice that map per wave. Lists check-runs with GITHUB_TOKEN's checks:read; mints an App token only to prove the key authenticates before any wave applies.
+description: Map every cell of the given stages to its pre-existing App-authored apply-check ids, before any of them applies, and slice that map per stage. Lists check-runs with GITHUB_TOKEN's checks:read; mints an App token only to prove the key authenticates before any of them applies.
 inputs:
   head-sha:
     description: PR head SHA carrying the pending apply checks.
     required: true
   waves-json:
-    description: This run's wave matrices (the apply-env-level.yml waves_json shape).
+    description: JSON object mapping each stage key to its cell rows, such as one element of detect's `levels`.
     required: true
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count.
@@ -13,13 +13,17 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  key:
+    description: One stage key of `waves-json` to snapshot alone; empty snapshots every stage. A key the map lacks refuses.
+    required: false
+    default: ""
   counted:
     description: '"true" refuses a check-run listing that holds fewer rows than its total_count.'
     required: false
     default: "false"
 outputs:
   by_wave:
-    description: JSON object mapping each wave key of `waves-json` to the pre-existing apply-check ids of that wave's cells; `{}` for an empty wave.
+    description: JSON object mapping each stage key snapshotted to the pre-existing apply-check ids of that stage's cells; `{}` for an empty stage.
     value: ${{ steps.snap.outputs.by_wave }}
   refusal:
     description: The first error of the `::error::` message that failed the step, without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
@@ -39,6 +43,7 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_STAGE_KEY: ${{ inputs.key }}
         COUNTED: ${{ inputs.counted }}
       run: |
         set -euo pipefail

@@ -85,19 +85,15 @@ _DETECT_STEPS = {
     },
 }
 
-#: The whole `outputs:` of `apply-run.yml`'s `detect`, each read from the one step. A targeted apply
-#: gets levels 1-3 `_empty = 'true'` from `apply-detect`'s own write; a missing `_empty` reads ''
-#: and runs its level red, never skips it.
+#: The whole `outputs:` of `apply-run.yml`'s `detect`, each read from the one step. A missing
+#: `empty` reads '' and runs `waves` red, never skips it.
 _APPLY_DETECT_OUTPUTS = {
-    "envlevel0_waves": "${{ steps.d.outputs.envlevel0_waves }}",
-    "envlevel1_waves": "${{ steps.d.outputs.envlevel1_waves }}",
-    "envlevel2_waves": "${{ steps.d.outputs.envlevel2_waves }}",
-    "envlevel3_waves": "${{ steps.d.outputs.envlevel3_waves }}",
-    "envlevel0_empty": "${{ steps.d.outputs.envlevel0_empty }}",
-    "envlevel1_empty": "${{ steps.d.outputs.envlevel1_empty }}",
-    "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
-    "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
-    "first_level": "${{ steps.d.outputs.first_level }}",
+    "levels": "${{ steps.d.outputs.levels }}",
+    "stages": "${{ steps.d.outputs.stages }}",
+    "keys": "${{ steps.d.outputs.keys }}",
+    "counts": "${{ steps.d.outputs.counts }}",
+    "cells": "${{ steps.d.outputs.cells }}",
+    "empty": "${{ steps.d.outputs.empty }}",
     "head_sha": "${{ steps.d.outputs.head_sha }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
@@ -110,17 +106,14 @@ _APPLY_DETECT_OUTPUTS = {
     "decision": "${{ steps.pr.outputs.decision }}",
 }
 
-#: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every env-level's
+#: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every stage's
 #: cells install; dropped, each cell's `versions` reads '' and refuses.
 _DEPLOY_DETECT_OUTPUTS = {
-    "envlevel0_waves": "${{ steps.d.outputs.envlevel0_waves }}",
-    "envlevel1_waves": "${{ steps.d.outputs.envlevel1_waves }}",
-    "envlevel2_waves": "${{ steps.d.outputs.envlevel2_waves }}",
-    "envlevel3_waves": "${{ steps.d.outputs.envlevel3_waves }}",
-    "envlevel0_empty": "${{ steps.d.outputs.envlevel0_empty }}",
-    "envlevel1_empty": "${{ steps.d.outputs.envlevel1_empty }}",
-    "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
-    "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
+    "levels": "${{ steps.d.outputs.levels }}",
+    "stages": "${{ steps.d.outputs.stages }}",
+    "keys": "${{ steps.d.outputs.keys }}",
+    "counts": "${{ steps.d.outputs.counts }}",
+    "empty": "${{ steps.d.outputs.empty }}",
     "head_sha": "${{ steps.d.outputs.head_sha }}",
     "pr_number": "${{ steps.d.outputs.pr_number }}",
     "refused_locked": "${{ steps.d.outputs.refused_locked }}",
@@ -233,22 +226,23 @@ def test_the_apply_detect_checkout_is_one_blobless_full_history_step():
 
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
-    """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
+    """Mutations: change `keys` to read `steps.d.outputs.stages`; delete
     `refusal`, so the apply comment never names a detect refusal; add
     `report: ${{ steps.d.outputs.report }}`, a job output GitHub drops whole when any part of it
     is masked; restore `held_cells: ${{ steps.d.outputs.held_cells }}`; delete `provenance_run`;
     delete `base_sha`; drop `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal
-    reaches the comment and the gate as the generic text; delete `tools`, so every wave cell
+    reaches the comment and the gate as the generic text; delete `tools`, so every cell
     refuses; read `refused_by_rule` as `steps.setup.outputs.refused_by_rule ||
     steps.d.outputs.refused_by_rule`, so a setup failure could read as a rule refusal; drop
     `steps.pr.outputs.refusal ||` from `refusal`; delete `decision`, so `lock` refuses every
-    run; delete `first_level`, so `lock` snapshots no level and every level snapshots its own."""
+    run; delete `cells`, so `lock` locks nothing and the result comment expects no cell."""
     assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
 def test_the_deploy_detect_job_outputs_exactly_these_expressions():
-    """Mutations: delete `tools`, so every wave cell refuses; read it from `steps.d`; delete
-    `push`, so `replan` re-plans no open pull request."""
+    """Mutations: delete `tools`, so every cell refuses; read it from `steps.d`; delete
+    `push`, so `replan` re-plans no open pull request; delete `empty`, so `waves` runs over no
+    stage and dies at fromJSON."""
     assert workflow_yaml("deploy.yml")["jobs"]["detect"]["outputs"] == _DEPLOY_DETECT_OUTPUTS
 
 
@@ -277,31 +271,36 @@ def test_only_the_listed_steps_carry_the_variables():
 #: each by name, and an output the action stops declaring reads '' there. The comment's fields
 #: are no output: they travel in the `apply-report` artifact.
 _APPLY_DETECT_ACTION_OUTPUTS = {
-    "envlevel0_waves": {
+    "levels": {
         "description": (
-            "JSON wave0..wave7 map for env-level 0. A targeted apply puts every cell here."
+            "JSON list, one element per populated env-level in run order; each element is a JSON "
+            'string of that level\'s `{"L<i>-W<w>": [cell row, ...]}` stage map. A targeted apply '
+            "has one level."
         ),
-        "value": "${{ steps.d.outputs.envlevel0_waves }}",
+        "value": "${{ steps.d.outputs.levels }}",
     },
-    **{
-        f"envlevel{n}_waves": {
-            "description": f"JSON wave0..wave7 map for env-level {n}",
-            "value": f"${{{{ steps.d.outputs.envlevel{n}_waves }}}}",
-        }
-        for n in (1, 2, 3)
-    },
-    **{
-        f"envlevel{n}_empty": {
-            "description": f"'true' when env-level {n} has no cell in any wave.",
-            "value": f"${{{{ steps.d.outputs.envlevel{n}_empty }}}}",
-        }
-        for n in (0, 1, 2, 3)
-    },
-    "first_level": {
+    "stages": {
         "description": (
-            "The lowest env-level with a cell in any wave, '0' to '3'; empty when no level has one."
+            "JSON list in run order of `{key, n, level, first}`: the stage key, its run position, "
+            "its index into `levels`, and whether it is its level's first stage."
         ),
-        "value": "${{ steps.d.outputs.first_level }}",
+        "value": "${{ steps.d.outputs.stages }}",
+    },
+    "keys": {
+        "description": "JSON list of the stage keys in run order.",
+        "value": "${{ steps.d.outputs.keys }}",
+    },
+    "counts": {
+        "description": "JSON list of each stage's cell count in run order.",
+        "value": "${{ steps.d.outputs.counts }}",
+    },
+    "cells": {
+        "description": "JSON list of every cell's `{stack, environment}`, in run order.",
+        "value": "${{ steps.d.outputs.cells }}",
+    },
+    "empty": {
+        "description": "'true' when no stage has a cell.",
+        "value": "${{ steps.d.outputs.empty }}",
     },
     "head_sha": {
         "description": "The echoed head SHA.",
@@ -347,7 +346,7 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: add a `report` output to `actions/apply-detect/action.yml`; restore its
     `pusher` output; delete its `refusal` output; delete its `provenance_run` output; delete its
     `base_sha` output; restore `held_cells` in `base_sha`'s description; delete its
-    `refused_by_rule` output; delete its `first_level` output."""
+    `refused_by_rule` output; delete its `cells` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
 
 

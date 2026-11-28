@@ -10,8 +10,8 @@ nothing.
 Each step, `uses:` aside, is asserted whole against a hand-written table: `id: setup` and
 `resolve: "true"` at the five detect jobs, whose `tools` output reads that id; `versions` at every
 cell, from its detect job's output (`cell.yml` from its `tools` input, which `apply-run.yml` and
-`deploy.yml` fill through `apply-env-level.yml`) and at `deploy.yml`'s `warm` job, which installs
-OpenTofu to fill the provider cache; `tofu: "false"` at the detect jobs, which never run
+`deploy.yml` fill through `waves.yml` and `stage.yml`) and at `deploy.yml`'s `warm` job, which
+installs OpenTofu to fill the provider cache; `tofu: "false"` at the detect jobs, which never run
 OpenTofu; `cache-save: "true"` at `deploy.yml`'s two sites and `drift.yml`'s `drift` site, the
 jobs that save the release files and run the default branch's merged code; and `if: false` on the
 manifest-load parse probe.

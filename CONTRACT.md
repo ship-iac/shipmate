@@ -152,24 +152,25 @@ refuses the run before any cell applies.
    commits that changed the stack. Each check's `external_id` holds the plan's
    record; GitHub keeps 255 characters of an `external_id`, so a record over
    that refuses the plan summary.
-2. Flipped to `in_progress` when its wave is released, linked to the apply run,
+2. Flipped to `in_progress` when its stage is released, linked to the apply run,
    its start time set to the release, so GitHub's duration counts from the
    release. In an apply run, `apply-run.yml`'s `lock` releases the first
-   populated env-level's `wave0` (First level, below).
+   stage (First level, below).
 3. Written once the cell's outcome is read. The summary is never rewritten; the
    error goes in the title. A check returned to `queued` keeps its last start
    time. A cell's `save` job writes its `success`, at its step
    `Complete this cell's apply check`, once the cell's `apply` job and the
-   `save` job's `Save the cell's state` step succeeded. The level's `complete`
-   job runs only when a release or wave of the level failed or was cancelled,
-   or the run was cancelled, and then writes every check of the level.
+   `save` job's `Save the cell's state` step succeeded. The stage's `complete`
+   job runs only when the stage's `entry` job or one of its cells failed or was
+   cancelled, or the run was cancelled, and then writes every check of the
+   stage. A stage refused before its release (§Fan-out) writes nothing.
 
 | Cell outcome | Write |
 | --- | --- |
 | applied, state saved | `completed` / `success`, linked to the cell's apply job, titled with the plan's counts. A check created before its record carried a title keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
 | failed | `queued`, titled `Failed: <first error line>`, linked to the failed job: the cell's apply job, or its `save` job when the apply never ran |
 | cancelled | `queued`, titled `Cancelled` |
-| not run: its wave did not run | `queued`, titled `Not run` |
+| not run: the cell's job never started, after its stage was released or, for the first stage, after a `lock` that ended before the flip without recording a refusal (`unflip`, below) | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
 | unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Failed completion** describe |
@@ -182,8 +183,8 @@ read.
 
 A cell's state counts as saved when its `save` job's `Save the cell's state`
 step succeeded, whatever the job's conclusion. A `save` job that fails after
-that step, at the check write, saved the state: its wave fails, so later waves
-and environment levels do not start, and the level's `complete` writes the
+that step, at the check write, saved the state: its stage fails, so later
+stages do not start, and the stage's `complete` writes the
 cell's check `success`. The apply result comment then shows that cell applied,
 the cells that did not start `not attempted`, and
 ``retry with `shipmate apply` ``: comment `shipmate apply` again, which applies
@@ -224,9 +225,9 @@ that run never applied the cell, a bare or targeted `shipmate apply` applies
 it, a merge deploy queues it, and an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
 **Failed completion.** A check of a cell whose `save` did not write its
-`success` is written by the level's `complete` alone. A `complete` that fails,
+`success` is written by the stage's `complete` alone. A `complete` that fails,
 including one whose jobs listing still lags after its about 2 minutes of
-retries, leaves the level's failed and cancelled cells' checks `in_progress`,
+retries, leaves the stage's failed and cancelled cells' checks `in_progress`,
 linked to the run, and the next apply or deploy of the cell reads that run as
 the holder (table below):
 
@@ -258,17 +259,19 @@ A merge deploy whose own `complete` fails this way leaves the checks
   through a new pull request touching it.
 
 **First level.** In an apply run, `apply-run.yml`'s `lock` snapshots the first
-populated env-level's checks and flips its `wave0`, so that level's `snapshot`
-and `wave0-release` jobs skip and its cells' `save` jobs and its `complete`
-job write on `lock`'s check ids. Every later level, and every level of a merge
-deploy, snapshots and releases its own. When the first level's call never
-starts after `lock` ran (a run cancelled between them, or a `lock` that failed
-after its snapshot), `apply-run.yml`'s `unflip` job writes that level's `wave0`
-checks `queued`, titled `Not run`. A refusal `lock` records before the flip (a
+populated env-level's checks and releases its first stage, so that stage's
+`entry` job skips, and the first level's stages write on `lock`'s check ids.
+Every later level, and every level of a merge deploy, snapshots its own. When
+`waves` does not succeed after `lock` ran (a run cancelled between them, a
+`lock` that failed after its snapshot, or a stage that failed or was
+cancelled), `apply-run.yml`'s `unflip` job writes the first stage's checks
+from its cells' jobs as `complete` would, unless that stage's own `complete`
+succeeded or was skipped; a cell of it with no job in any attempt of the run is
+written `queued`, titled `Not run`. A refusal `lock` records before the flip (a
 changed review decision, a cell lock another pull request holds, a missing or
 unprotected environment, a failed check listing) skips `unflip`. A `lock` that
 ends before the flip without recording one (a failed key check or token mint, a
-cancel) still runs `unflip`, which retitles those `queued` checks `Not run`.
+cancel) still runs `unflip`, which retitles the first stage's `queued` checks `Not run`.
 After a lost `lock` runner, `unflip` lists the head's checks again and fails
 when the listing holds fewer rows than its total count. Accepted limits:
 
@@ -307,11 +310,11 @@ apply check another run holds in progress). Each pre-merge refusal starts
 
 Accepted limits:
 
-- When every cell of a cancelled wave is missing from the run's jobs listing,
+- When every cell of a cancelled stage is missing from the run's jobs listing,
   its cells are written `Not run`, even if a cell started before the cancel;
   the check returns to `queued` either way (fail closed), and only the title
   differs.
-- `in_progress` marks the wave's release, not the cell's start, and lands after
+- `in_progress` marks the stage's release, not the cell's start, and lands after
   a runner delay: a cell waiting on an environment approval, or for another run
   of the same cell to finish, already reads `in_progress`.
 - The cells' job rows and the `<env>-apply` deployments stay under the default
@@ -494,11 +497,12 @@ off the pull request's checks list.
   inside an auto-created environment holds no reviewers, no wait timer and no
   deployment branch policy, against the right code and the right state.
 - **A binding that names no existing environment, or one with no deployment
-  branch policy, is refused before any wave applies.** The pre-flight job of each env-level,
-  before its `wave0` — `apply-run.yml`'s `lock` for an apply run's first
-  populated level, `apply-env-level.yml`'s `snapshot` for every later level and
-  every level of a merge deploy — reads the `env_binding` of
-  every cell in the incoming matrix, lists the repository's environments once,
+  branch policy, is refused before its stage applies.** The pre-flight —
+  `apply-run.yml`'s `lock` for an apply run's first populated level, and
+  `stage.yml`'s `entry` for every later level and every level of a merge
+  deploy: the whole level at its first stage, then each later stage's own
+  cells again — reads the `env_binding` of
+  every cell it covers, lists the repository's environments once,
   and fails the run naming every binding the repository does not have, plus
   both ways to fix it: create that environment, or correct the environment's
   entry in `.github/shipmate-config.yml`. It then fails the run naming every
@@ -507,10 +511,11 @@ off the pull request's checks list.
   policy (custom branches or protected branches) is the consumer's choice. It is
   what refuses a binding naming no environment: it compares existence and the
   presence of a branch policy, not table content, and a cell resolves its variables
-  from the table whatever it bound. It runs once per env-level,
-  so an env-ordered deploy can have completed an earlier level's applies before a
-  later level is refused — a partial deploy, not an unverified apply: every level
-  verifies its own environments before its own waves.
+  from the table whatever it bound. It runs at each env-level's first stage and
+  again at each later stage of the level, except in an apply run's first level, so a run can
+  have completed earlier stages' applies before a later stage is refused — a
+  partial deploy, not an unverified apply: every stage's environments are
+  verified before it applies.
   - Its own failures are fail-closed as well. A listing that could not be read,
     or one whose `total_count` exceeds the number of environments returned,
     fails the run rather than letting the applies through — a check that did not
@@ -519,21 +524,21 @@ off the pull request's checks list.
   - It costs a caller nothing, but not because it needs nothing: listing
     environments needs `actions: read` — on a private repository the default
     `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
-    call site already grants `actions: read` for its wave jobs and `complete`, so
-    the `uses:` permission cap is already high enough; `lock` requests
-    `actions: read` and `checks: read` itself. A hand-written wrapper
-    calling `apply-env-level.yml` must grant it. The environment check uses no
+    call site already grants `actions: read` for its stages, so
+    the `uses:` permission cap is already high enough; `lock` and `entry`
+    request `actions: read` and `checks: read` themselves. A hand-written wrapper
+    calling `waves.yml` or `stage.yml` must grant it. The environment check uses no
     App key or App permission. The pre-flight job binds `shipmate-engine`, verifies
     the App key arrived and mints an App token whose only use is to prove the
     key authenticates, so a missing, revoked or wrong key fails the pre-flight
-    job (`lock` for the first level, `snapshot` for later ones) before any wave.
+    job (`lock` for the first level, `entry` for later ones) before its stage.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names
     the wrong branches, which nothing checks (`shipmate doctor` warns on a
     missing policy only); an environment with no approval rules, which `shipmate
     doctor` notes; and an environment created or deleted in the window between
-    the pre-flight and the wave jobs.
+    the pre-flight and the cell jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
@@ -551,8 +556,8 @@ off the pull request's checks list.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `queue` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml`'s `snapshot`,
-  `wave0-release` … `wave7-release` and `complete`, `cell.yml`'s `save`,
+  `queue` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `waiters`, `lock`, `unflip` and `summary`, `stage.yml`'s `entry`
+  and `complete`, `cell.yml`'s `save`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1218,7 +1223,7 @@ job each request `id-token: write` and run
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
 except that a shared environment (`split: false`) resolves `aws.apply` on
-every path. The `snapshot` and `complete` jobs and each apply
+every path. The `lock`, `entry` and `complete` jobs and each apply
 cell's `save` job deliberately get no cloud credential.
 
 On the apply path the engine passes through whatever role the environment
@@ -1272,7 +1277,7 @@ so the `plan`, `drift`, `deploy`, `apply`, `auto` and `unlock` jobs of the
 consumer's `shipmate.yml` grant it; its `comment-ops` and `release` jobs do
 not, because no job in engine `comment-ops.yml` or `release.yml` requests it. This applies to a consumer that
 uses no cloud credentials whatsoever: without the grant the run fails at
-workflow-resolution time, the same failure mode `apply-env-level.yml` already
+workflow-resolution time, the same failure mode `stage.yml` already
 documents for its `checks: read` requirement. The grant belongs on the calling
 job and nowhere else — a job-level `permissions:` block replaces the
 workflow-level default rather than intersecting it, so a top-level block that
@@ -2081,7 +2086,7 @@ this dispatch did not meet the apply job's conditions and no rule names why;
 comment 'shipmate apply' on the pull request`` when no check names one. `outcome`
 runs after `run` (§Outcome reply). `run` calls `apply-run.yml`, which holds
 every job that claims, reviews, detects, locks, applies or summarizes: `review`,
-which claims the comment, and `detect`, which run side by side, `waiters`, which runs after `review` and which no job needs, `lock`, `envlevel0` … `envlevel3` (named `L0` … `L3`), `unflip` and
+which claims the comment, and `detect`, which run side by side, `waiters`, which runs after `review` and which no job needs, `lock`, `waves`, which runs one job per stage (§Fan-out), `unflip` and
 `summary`. `apply-run.yml` runs in the
 top-level concurrency group `shipmate-apply-<pr_number>` with
 `cancel-in-progress: false` and `queue: max`, so one apply run (`apply` or
@@ -2186,8 +2191,8 @@ is stale, and `queue` cancels it only when this run's own listed `ref` is the
 live head (a run whose own title is not listed at the live head cancels nothing;
 stale runs stay until a run at the live head cancels them or they reach `review`,
 which refuses the moved head), its jobs listing is complete, both head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
-cell's jobs are exactly `<caller> / run / L<n> / <env> / <stack> / apply` and
-`... / save`, six segments, so a caller job name containing ` / ` never matches
+cell's jobs are exactly `<caller> / run / waves / L<i>-W<w> / <env> / <stack> / apply` and
+`... / save`, seven segments, so a caller job name containing ` / ` never matches
 and such a run is kept) either:
 
 - (a) waits for `shipmate-apply-<pr_number>`: its job named exactly
@@ -2269,10 +2274,10 @@ A cancelled stale run writes, by where it waited:
   apply checks and `shipmate / gate` stay as they were, and it posts no reply of
   its own after the cancel: it never claimed its comment. Its `queue` job may
   already have posted a waits reply.
-- On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
-  so the level's `complete` returns the wave's flipped checks to `queued` titled
-  `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
-  they stay pending. `summary` runs after a
+- On an `<env>-apply` environment's approval (b): the waiting stage ends `cancelled`,
+  so its `complete` returns its flipped checks to `queued` titled
+  `Cancelled`, and later stages never start, so their checks stay `queued`
+  (§Apply check lifecycle): all stay pending. `summary` runs after a
   successful `review`, posts the apply comment and refreshes the old head's gate,
   so `outcome` stays silent.
 
@@ -2554,14 +2559,14 @@ check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <env> / <stack>`) — created pending by
   `actions/summary`, completed by `actions/cell-complete` in each cell's `save`
-  job in `cell.yml`, by `actions/apply-complete` in `apply-env-level.yml`'s
+  job in `cell.yml`, by `actions/apply-complete` in `stage.yml`'s
   `complete` job, and by `apply-run.yml`'s `unflip` for
-  a first level whose call never started (all
+  a first stage whose own `complete` did not succeed and was not skipped (all
   bound to `shipmate-engine`) — creator and completers each mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
-  consistent). Release jobs, and `apply-run.yml`'s `lock` for the first
-  populated level's `wave0`, flip them `in_progress` first. A completion sends
+  consistent). Each stage's `entry` job, and `apply-run.yml`'s `lock` for the
+  first stage, flip them `in_progress` first. A completion sends
   `output` only with the check's own summary, read back first, so the plan a
   changed cell's check was created with stays on it (§Apply check lifecycle).
 - **The aggregate gate** (`shipmate / gate`) — read and written only by
@@ -2772,11 +2777,11 @@ not this deleter's lock, and done; still on the same commit refuses.
 | Event | Job | Effect |
 | --- | --- | --- |
 | `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Refuses the whole run first when a cell it would apply is behind the base (§`apply_mode: auto`, Behind the base, bare and targeted). Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
-| the same run | `apply-run.yml` `lock`, after `review` and `detect` and before the first env-level | Refuses before any lock when `review` and `detect` read different review decisions (below). Locks every cell the env-levels will apply, then runs the first populated env-level's pre-flight and `wave0` release (§Apply check lifecycle, First level). A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
+| the same run | `apply-run.yml` `lock`, after `review` and `detect` and before the first stage | Refuses before any lock when `review` and `detect` read different review decisions (below). Locks every cell the stages will apply, then runs the first populated env-level's pre-flight and the first stage's release (§Apply check lifecycle, First level). A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
 | merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <env> / <stack>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
-| merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
-| merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
-| merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
+| merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any stage, and no cell applies (below) |
+| merge deploy | `deploy.yml` stage cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
+| merge deploy | `deploy.yml` `summary` | After the stages, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <env> / <stack>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head and is no behind record, a cell this pull request cannot apply; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth, its walk is cut short or it cannot be read, or while a run that may still apply a holder's cells is live or the runs cannot all be read (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder names its chain and says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`; a holder whose walk is cut short gets a `could not tell` line instead and leaves the gate alone (§Plan comment) |
@@ -2822,7 +2827,7 @@ merges or closes, or another pull request evicts them with
 `shipmate unlock <env> --evict`.
 
 **Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed
-wave jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours
+stage jobs and neither `detect` nor `lock`, and a first attempt's stage can wait hours
 on an environment approval. So on every attempt each pre-merge apply cell first runs
 the pre-apply check, read-only, as the second step of the cell's `apply` job, after
 the App-key refusal and before its checkout and cloud credentials. It refuses unless
@@ -2900,8 +2905,8 @@ applied. A failed lock read refuses the run as well. The refused deploy's apply
 checks stay pending on the merged head, and its `summary` turns that head's
 `shipmate / gate` to `failure`, as for any `detect` refusal.
 
-A cell locked after `detect` is caught by the cell itself. Each wave cell of
-the merge deploy runs the pre-apply check in deploy mode (`apply-env-level.yml`
+A cell locked after `detect` is caught by the cell itself. Each cell of
+the merge deploy runs the pre-apply check in deploy mode (`waves.yml`
 input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
@@ -3685,11 +3690,11 @@ The nine jobs:
   it holds the App key only for a head `summary` would admit, except after a
   failed `facts` on an owned claim, when no head is known; it checks nothing
   out. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
-- **`apply.yml` / `apply-run.yml` / `apply-env-level.yml` / `cell.yml` /
-  `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
+- **`apply.yml` / `apply-run.yml` / `waves.yml` / `stage.yml` /
+  `cell.yml` / `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (claiming the command comment, reading the review decision, telling the
-  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates, flipping wave checks to `in_progress` or returning them, completing apply checks, refreshing the gate, posting the apply result
+  apply runs waiting behind this one, acquiring cell locks, proving before any stage that the App key authenticates, flipping a stage's checks to `in_progress` or returning them, completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks,
   re-planning the open pull requests a merge may put behind) are likewise bound
   to `shipmate-engine`.
@@ -3868,15 +3873,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
-  pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but twenty-six, which run on
+  pass it through `waves.yml` to `stage.yml`, where it is required. It sets the runner of
+  every engine job but eighteen, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
   `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review`, `waiters`, `unflip` and `summary`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release` and
-  `complete`, and `unlock.yml`'s
+  `stage.yml`'s `entry` and `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the twenty-six
+  for a runner. An account that cannot use `ubuntu-slim` leaves the eighteen
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -4014,13 +4018,31 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   it reads the run-graph, before any other ordering check and before any cell
   runs, and the deploy's refusal also lists the merge's pending cells. The read
   covers the whole tree, so a cycle anywhere refuses every pull request's plan.
-- The waves of an env-level are its populated levels only, renumbered from
-  `wave0`: a level with no cell in the run takes no wave job, and the order
-  between levels is kept. An env-level holds at most eight populated levels,
-  one per pre-declared `wave0` … `wave7` job; more refuse at detect, before
-  any cell runs, with
-  `::error::change spans <n> populated dependency levels (> 8); split the PR.`,
-  where `<n>` counts the populated levels.
+- An apply runs in stages, one per populated pair of env-level `<i>` (§Env
+  apply order) and wave `<w>`, the stack's level in the full run-graph, keyed
+  `L<i>-W<w>`. A pair with no cell in the run takes no stage. The stages run
+  one at a time, ordered by `<i>`, then `<w>`, each as the job
+  `<caller> / waves / L<i>-W<w>` (`apply / run / waves / ...` in an apply run,
+  `deploy / waves / ...` in a merge deploy), its cells
+  `... / L<i>-W<w> / <env> / <stack> / apply` and `... / save` in parallel.
+  A stage that fails or is cancelled starts no later stage. Each stage after
+  the first starts only when this run attempt's jobs show every cell of every
+  earlier stage with `apply` and `save` jobs that succeeded; otherwise, after
+  up to 2 minutes of re-reads, it refuses before its release with
+  `::error::stage <key> cannot start: <reason>`, where `<reason>` names the
+  first unproven cell or the stage's observed and expected cell counts. An
+  earlier stage whose cell matrix ended unexpanded with no cell job refuses at
+  once: `the cell matrix of stage <key> never expanded: it concluded <conclusion>`.
+- Detect refuses before any cell runs when the apply spans more than 256
+  stages:
+  `::error::the apply spans <n> stages (> 256), one per populated env-level and stack-wave pair; split the change.`;
+  when a stage holds more than 256 cells:
+  `::error::stage <key> holds <n> cells (> 256); split the change.`; when one
+  env-level's stage map, `<i>` of its stage keys `L<i>-W<w>`, is more than
+  128,000 UTF-8 bytes, what one environment variable carries:
+  `::error::env-level L<i> holds <n> cells whose stage map is <m> bytes (> 128000), past what one environment variable carries; split the change across pull requests so each env-level holds fewer cells.`;
+  and when its outputs total more than 500,000 characters:
+  `::error::the outputs for <n> cells total <m> characters (> 500000), past what a job's outputs carry; split the change.`
 - A cell `(stack, env)` runs after these cells of each stack its stack is
   `after`, directly or transitively. "The same environment" below is the
   environment of the cell each step walks from, not only the starting cell's:
@@ -4933,7 +4955,7 @@ names an error. A job that failed without an `::error::` renders no fence.
   is not found. An applied, failed or not-recorded row with apply output renders as a
   fold-out (`<details><summary>` + its line + `</summary>`, then the output in
   a plain code fence); every other row is its bare line. An expected cell whose
-  artifact never arrived (its wave/env-level was skipped after an upstream
+  artifact never arrived (its stage was skipped after an upstream
   failure, or the run was cancelled before upload) is not attempted unless its
   apply check is already done (see the derivation rules below).
 - **Notes**, each on its own line when it has content: `state lock held:`,
@@ -5238,7 +5260,7 @@ refused text, and the reply still needs its own key check, mint and post. The re
 
 - refused when `review` failed;
 - otherwise cancelled when `run-cancelled` is `true`: `apply-run.yml`'s
-  `review`, `detect`, `lock` or `envlevel0` … `envlevel3` ended `cancelled`;
+  `review`, `detect`, `lock` or `waves` ended `cancelled`;
 - otherwise summary cancelled when `summary` ended `cancelled` and no other job
   did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
@@ -5607,7 +5629,7 @@ that fails refuses at `Decrypt reviewed plan artifact`, before any apply step,
 and a cached state entry at the state restore (§State backend). `apply-cell`
 decrypts the plan after download on every apply path: both paths pass it as
 the `SHIPMATE_ENCRYPTION_KEY` secret into the
-reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
+reusable `waves.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` and the `apply-run.yml` it
 calls for the targeted, bare and `auto` forms. The same cipher and secret encrypt a local backend's cached state
 (§State backend). Consumers set `SHIPMATE_ENCRYPTION_KEY` as a repository or
@@ -5873,10 +5895,8 @@ for that deploy run — the failed environment's stacks stay pending, and
 downstream environments are not touched until it is fixed and re-run. A cell
 whose apply check is held, titled `State not saved`, is fixed by
 `docs/troubleshooting.md` §`The apply step ran and its state was not saved`,
-never by a re-run, which refuses it.
-`MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
-that fails validation of the table, naming one longest chain, rather than silently
-truncating.
+never by a re-run, which refuses it. The number of env-levels has no limit of
+its own; the stage limits apply (§Fan-out).
 
 `needs` is a coarser order on top of `after`: it adds order between
 environments and decides which instances of an upstream stack a cell runs after
@@ -5955,22 +5975,21 @@ environment that is not `auto`, waits. The apply-all-detect notice counts the
 overlap cells as `overlap=<n>` and the attempted cells as `attempted=<n>`, and names every skipped environment
 `skipped_after_targeted`, as on the bare form.
 
-The engine ships this as a reusable, parameterized workflow
-(`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`
-and `apply-run.yml` reusable workflows call once per env-level, passing that
-level's pre-computed wave matrix; the workflow itself still fans applies out
-stack-wave by stack-wave exactly as described above (see Fan-out).
+The engine ships this as the reusable workflow `.github/workflows/waves.yml`,
+which the engine's own `deploy.yml` and `apply-run.yml` reusable workflows
+call once, passing every stage; it runs each stage through `stage.yml`, one at
+a time in env-level, then wave order (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
-`.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
-`apply-env-level.yml` → gate completion + cell lock release → re-plan of the
+`.github/workflows/deploy.yml` (deploy-detect → stages via
+`waves.yml` → gate completion + cell lock release → re-plan of the
 open pull requests the merge may put behind (§Plan comment); beside the
-env-levels, `warm` saves the provider cache entry of each distinct lock and the
+stages, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (guard on a refused dispatch; otherwise queue beside
-`apply-run.yml`, one run per pull request at a time: review, which claims the comment, beside detect, waiters after review → cell lock acquisition and the first level's pre-flight and wave0 release →
-env-levels 0..3 via `apply-env-level.yml` → unflip when the first level never started → result comment + gate refresh;
+`apply-run.yml`, one run per pull request at a time: review, which claims the comment, beside detect, waiters after review → cell lock acquisition and the first level's pre-flight and the first stage's release →
+stages via `waves.yml` → unflip when the stages did not succeed → result comment + gate refresh;
 then the outcome reply when no result comment posted; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one
 every pending `auto` environment in `needs` order), and the unlock path

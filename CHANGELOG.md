@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed — BREAKING
+
+- **An apply runs its populated stages one at a time, so the four-env-level and eight-wave limits are gone.** A stage is one populated pair of env-level and stack wave, keyed `L<i>-W<w>`. `apply-run.yml` and `deploy.yml` call the new `waves.yml`, which runs each stage through `stage.yml` (`entry`, the cells, `complete`); `apply-env-level.yml` is removed. Cell job checks read `apply / run / waves / L<i>-W<w> / <env> / <stack> / apply` and `... / save` (`deploy / waves / ...` in a merge deploy), a stage's guard, pre-flight and release run in `.../waves / L<i>-W<w> / entry` and its cleanup in `.../waves / L<i>-W<w> / complete`, and the `.../L<n> / snapshot`, `.../L<n> / wave<k>-release` and `.../L<n> / complete` job checks are removed; rename any ruleset, alert or dashboard that names them. Detect refuses more than 256 stages, a stage of more than 256 cells, an env-level whose stage map is over 128,000 UTF-8 bytes (one environment variable; a few hundred cells), and outputs over 500,000 characters; `needs` takes any number of env-levels. A cell whose apply check a run started before the upgrade still holds `in_progress` refuses: follow `docs/troubleshooting.md` §`The apply step ran and its state was not saved`; before a pre-merge apply, also return or complete the check as in §Return an in-progress apply check by hand (`CONTRACT.md` §Fan-out, §Apply check lifecycle, In-progress checks).
+
 ## [0.59.0] — 2026-11-28
 
 Tags `b468954`.

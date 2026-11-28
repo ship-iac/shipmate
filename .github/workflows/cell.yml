@@ -127,7 +127,7 @@ jobs:
           environment: ${{ inputs.environment }}
           state: ${{ needs.apply.outputs.state }}
       # Runs only after the state step succeeded. A failed write fails `save`, so the wave fails
-      # and the level's `complete` writes the check.
+      # and the stage's `complete` writes the check.
       - name: Complete this cell's apply check
         if: ${{ needs.apply.result == 'success' }}
         uses: $/actions/cell-complete

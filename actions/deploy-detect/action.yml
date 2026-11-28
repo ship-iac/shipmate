@@ -1,5 +1,5 @@
 name: shipmate deploy-detect
-description: Map a merge commit to its PR, find still-pending applies, order them into waves. Reads the job's GITHUB_TOKEN, which needs contents, checks, pull-requests and actions read.
+description: Map a merge commit to its PR, find still-pending applies, order them into stages. Reads the job's GITHUB_TOKEN, which needs contents, checks, pull-requests and actions read.
 inputs:
   base-sha:
     description: Previous main tip for change detection (github.event.before).
@@ -14,30 +14,25 @@ inputs:
     required: false
     default: ""
 outputs:
-  envlevel0_waves:
-    description: JSON wave0..wave7 map for env-level 0.
-    value: "${{ steps.detect.outputs.envlevel0_waves }}"
-  envlevel1_waves:
-    description: JSON wave0..wave7 map for env-level 1.
-    value: "${{ steps.detect.outputs.envlevel1_waves }}"
-  envlevel2_waves:
-    description: JSON wave0..wave7 map for env-level 2.
-    value: "${{ steps.detect.outputs.envlevel2_waves }}"
-  envlevel3_waves:
-    description: JSON wave0..wave7 map for env-level 3.
-    value: "${{ steps.detect.outputs.envlevel3_waves }}"
-  envlevel0_empty:
-    description: "'true' when env-level 0 has no cell in any wave."
-    value: "${{ steps.detect.outputs.envlevel0_empty }}"
-  envlevel1_empty:
-    description: "'true' when env-level 1 has no cell in any wave."
-    value: "${{ steps.detect.outputs.envlevel1_empty }}"
-  envlevel2_empty:
-    description: "'true' when env-level 2 has no cell in any wave."
-    value: "${{ steps.detect.outputs.envlevel2_empty }}"
-  envlevel3_empty:
-    description: "'true' when env-level 3 has no cell in any wave."
-    value: "${{ steps.detect.outputs.envlevel3_empty }}"
+  levels:
+    description: >-
+      JSON list, one element per populated env-level in run order; each element is a JSON string
+      of that level's `{"L<i>-W<w>": [cell row, ...]}` stage map.
+    value: "${{ steps.detect.outputs.levels }}"
+  stages:
+    description: >-
+      JSON list in run order of `{key, n, level, first}`: the stage key, its run position, its
+      index into `levels`, and whether it is its level's first stage.
+    value: "${{ steps.detect.outputs.stages }}"
+  keys:
+    description: JSON list of the stage keys in run order.
+    value: "${{ steps.detect.outputs.keys }}"
+  counts:
+    description: JSON list of each stage's cell count in run order.
+    value: "${{ steps.detect.outputs.counts }}"
+  empty:
+    description: "'true' when no stage has a cell."
+    value: "${{ steps.detect.outputs.empty }}"
   head_sha:
     description: PR head SHA for the merged commit.
     value: "${{ steps.detect.outputs.head_sha }}"

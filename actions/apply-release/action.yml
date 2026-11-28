@@ -1,25 +1,46 @@
 name: shipmate apply-release
-description: Flip one wave's apply checks to in_progress, linked to this run and started at this release, before the wave runs. A pre-merge re-run writes nothing, and neither does a pre-merge run whose pull request has merged. A failed write or pull request read fails the job, which skips the wave.
+description: Guard a stage (mode guard) or release it (mode release). The guard lets the stage start only once every earlier stage's cells applied and saved in this run attempt, waiting up to 2 minutes for unconcluded jobs, and fails the job otherwise. The release flips the stage's apply checks to in_progress, linked to this run and started at this release; a pre-merge re-run writes nothing, and neither does a pre-merge run whose pull request has merged. A failed write or pull request read fails the job, which skips the stage.
 inputs:
-  snapshot:
-    description: JSON object, the wave's slice of apply-snapshot's by_wave, mapping each cell to its apply-check ids.
+  mode:
+    description: "`guard` or `release`; any other value fails the job."
     required: true
+  by-wave:
+    description: Release mode. JSON object, apply-snapshot's by_wave, mapping each stage key to its cells' apply-check ids.
+    required: false
+  key:
+    description: Release mode. The stage key to release, selected from by-wave by exact name.
+    required: false
+  keys:
+    description: Guard mode. JSON list of the run's stage keys in run order.
+    required: false
+  counts:
+    description: Guard mode. JSON list of each stage's cell count, in the order of keys.
+    required: false
+  n:
+    description: Guard mode. The index in keys of the stage to guard.
+    required: false
+  job-id:
+    description: Guard mode. The calling job's id (`job.check_run_id`), which locates its stage.
+    required: false
   deploy:
-    description: "`true` on the merge deploy, whose re-runs still write."
-    required: true
+    description: "Release mode. `true` on the merge deploy, whose re-runs still write."
+    required: false
   pr-number:
-    description: The pull request the run applies; read before a pre-merge flip.
-    required: true
+    description: Release mode. The pull request the run applies; read before a pre-merge flip.
+    required: false
   app-id:
-    description: shipmate App id (a repo/org variable, not a secret).
-    required: true
+    description: Release mode. shipmate App id (a repo/org variable, not a secret).
+    required: false
   private-key:
-    description: shipmate App private key (from the shipmate-engine environment secret).
-    required: true
+    description: Release mode. shipmate App private key (from the shipmate-engine environment secret).
+    required: false
 runs:
   using: composite
   steps:
+    # Release steps run on every mode but `guard`, so a mistyped mode reaches the script's
+    # usage refusal instead of skipping every step.
     - name: Verify the App key arrived
+      if: ${{ inputs.mode != 'guard' }}
       uses: $/actions/verify-app-key
       with:
         app-id: ${{ inputs.app-id }}
@@ -27,6 +48,7 @@ runs:
 
     - name: Mint App installation token
       id: token
+      if: ${{ inputs.mode != 'guard' }}
       uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
       with:
         client-id: ${{ inputs.app-id }}
@@ -36,13 +58,30 @@ runs:
         # whose input is empty.
         permission-pull-requests: ${{ inputs.deploy != 'true' && 'read' || '' }}
 
-    - name: Flip the wave's apply checks to in progress
+    - name: Guard the stage
+      if: ${{ inputs.mode == 'guard' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHIPMATE_MODE: ${{ inputs.mode }}
+        SHIPMATE_STAGE_KEYS: ${{ inputs.keys }}
+        SHIPMATE_STAGE_COUNTS: ${{ inputs.counts }}
+        SHIPMATE_STAGE_N: ${{ inputs.n }}
+        SHIPMATE_JOB_ID: ${{ inputs.job-id }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-release" "$SHIPMATE_MODE"
+
+    - name: Flip the stage's apply checks to in progress
+      if: ${{ inputs.mode != 'guard' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
+        SHIPMATE_MODE: ${{ inputs.mode }}
+        SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
+        SHIPMATE_STAGE_KEY: ${{ inputs.key }}
         SHIPMATE_DEPLOY: ${{ inputs.deploy }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-release"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-release" "$SHIPMATE_MODE"

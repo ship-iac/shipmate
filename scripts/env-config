@@ -1060,23 +1060,6 @@ def _check_cycle(order):
         ) from exc
 
 
-def _check_depth(order, environments):
-    """`SystemExit` naming one longest chain when acyclic `order` spans more env levels
-    than a deploy applies: the deepest env, then a predecessor one level lower each step,
-    the sorted-first at every tie."""
-    wv = _load("waves")
-    levels = wv.env_levels(order, sorted(set(environments).union(*order.values())))
-    depth = max(levels.values(), default=0)
-    if depth < wv.MAX_ENV_LEVELS:
-        return
-    chain = wv.needs_chain(order, levels, min(e for e, lv in levels.items() if lv == depth))
-    raise SystemExit(
-        f"::error::needs spans {depth + 1} env levels: {' -> '.join(chain)}. "
-        f"A deploy applies at most {wv.MAX_ENV_LEVELS} env levels. Shorten the chain in "
-        f"{CONFIG_PATH}."
-    )
-
-
 def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
@@ -1137,9 +1120,8 @@ def check_env_name(e, label, matched):
 
 def _check_entries(environments, errors, identities):
     """Every entry name, then every entry, then each `needs` list, then the order they
-    declare -- the cycle check only when every list passed, the depth check only when the
-    order is acyclic. A non-mapping entry's `needs` is not read. `identities` is as
-    `_check_environment` takes it."""
+    declare -- the cycle check only when every list passed. A non-mapping entry's `needs` is not
+    read. `identities` is as `_check_environment` takes it."""
     for env in sorted(environments):
         with _gather(errors):
             check_env_name(env, f"environments.{env}", "an entry name")
@@ -1154,11 +1136,8 @@ def _check_entries(environments, errors, identities):
                 validate_env_name_list(entry["needs"], f"environments.{env}.needs")
             lists_ok = lists_ok and listed.ok
     if lists_ok:
-        with _gather(errors) as acyclic:
+        with _gather(errors):
             _check_cycle(order)
-        if acyclic.ok:
-            with _gather(errors):
-                _check_depth(order, environments)
 
 
 def validate_structure(table):
