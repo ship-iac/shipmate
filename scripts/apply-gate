@@ -29,9 +29,9 @@ import re
 import sys
 import urllib.parse
 
-import _shipmate
 from _shipmate import (
     decoded,
+    deferred_runs,
     gh_json,
     is_env_name,
     is_head_sha,
@@ -537,7 +537,7 @@ def _deferred_run(repo, listed, run, *, live=False):
         return False
     # An ended attempt's jobs do not change, so one read per attempt serves the process.
     key = (repo, listed["id"], listed.get("run_attempt"))
-    if key not in _shipmate.deferred_runs:
+    if key not in deferred_runs:
         jobs = listed_jobs(repo, listed["id"], run, counted=True)
         # A live run that lists no job yet has not deferred; a short listing may hide `defer`.
         if jobs == [] and not ended:
@@ -549,8 +549,8 @@ def _deferred_run(repo, listed, run, *, live=False):
             return False
         if not ended:
             return deferred(jobs)
-        _shipmate.deferred_runs[key] = deferred(jobs)
-    return _shipmate.deferred_runs[key]
+        deferred_runs[key] = deferred(jobs)
+    return deferred_runs[key]
 
 
 def planned(jobs):
