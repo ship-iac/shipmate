@@ -25,7 +25,8 @@ def _no_unpatched_retry_sleep(monkeypatch):
     monkeypatch.setattr(_shipmate, "_sleep", sleep)
     # The budget is per process, and every in-process test shares one.
     monkeypatch.setattr(_shipmate, "_rate_limit_waits", 0)
-    monkeypatch.setattr(_shipmate, "deferred_runs", {})
+    # `apply-gate` binds the dict at import, so it is emptied, not replaced.
+    _shipmate.deferred_runs.clear()
 
 
 @pytest.fixture
