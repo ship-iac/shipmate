@@ -1803,9 +1803,10 @@ def test_check_name_grammar_matches_apply_cells_construction():
 
 
 def test_every_stage_job_is_named_for_the_cell_job_grammar():
-    """`apply-gate.cell_part` reads `<caller> / waves / L<i>-W<w> / <env> / <stack> / <part>`: the
-    callers' job id `waves` with no `name:` of its own, `waves.yml`'s `stage` named by its stage
-    key, `stage.yml`'s `cell` named `<env> / <stack>` and its other jobs unnamed, compared whole.
+    """`apply-queue._cell_part` and `apply-complete`'s `unflip` read the callers' job id `waves`,
+    with no `name:` of its own, and `apply-gate.cell_part` reads `L<i>-W<w> / <env> / <stack> /
+    <part>`: `waves.yml`'s `stage` named by its stage key, `stage.yml`'s `cell` named
+    `<env> / <stack>` and its other jobs unnamed, compared whole.
     Mutations: add `name: stages` to deploy.yml's `waves`; name `waves.yml`'s `stage`
     `${{ matrix.n }}`; give `stage.yml`'s `entry` a `name:`."""
     callers = {
