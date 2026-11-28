@@ -5,6 +5,8 @@
 `apply-complete` reads that listing on stdin and prints one row per decided cell;
 `apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan;
 `apply-complete stranded <reasons>` refuses with the reasons no attempt resolved;
+`apply-complete unflip <first key>` reads that listing on stdin and prints the rows of the first
+stage, `<first key>`, for `apply-run.yml`'s `unflip` (`unflip`);
 `apply-complete own <by_wave> <stack> <env> <job id>` prints the `success` writes of one cell
 whose `apply` job `<job id>` succeeded and whose state is saved, for that cell's own `save` job
 (`own`).
@@ -13,11 +15,13 @@ Evidence is `GET /actions/runs/{id}/jobs?filter=all`, not the cells' own artifac
 conclusion is written by GitHub, so one cell cannot claim another applied. A cell lying about
 itself by exiting 0 is irreducible and is the trust level of every per-cell completion.
 
-A cell's jobs are `<level> / <env> / <stack> / apply` and `... / save` (`apply-gate.cell_rows`),
-`<level>` being this job's own (`SHIPMATE_JOB_ID`, this job's check run id, names it), so a
-listing that does not list this job matches no cell. The write reads the rows of this job's run
-attempt. The cells are those of the waves named in `SHIPMATE_WAVE_RESULTS_JSON`, `{wave key:
-result of its wave job}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`.
+A cell's jobs are `<stage> / <env> / <stack> / apply` and `... / save` (`apply-gate.cell_rows`),
+`<stage>` being the stage path of this job, `<caller> / run / waves / L<i>-W<w> / complete`
+(`apply-gate.level_of`; `SHIPMATE_JOB_ID`, this job's check run id, names it), so a listing that
+does not list this job matches no cell. The write reads the rows of this job's run attempt. The
+cells are those of the stage keyed in `SHIPMATE_WAVE_RESULTS_JSON`, `{stage key: result of its
+cell matrix}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`. When
+`SHIPMATE_ENTRY_PHASE` is `refused`, the stage was never released: it prints a notice and no row.
 
 Per cell, in this order:
 
@@ -52,10 +56,16 @@ no attempt resolved gets no write, so a stale listing never turns a completed `s
 `queued`. Accepted limit: when every cell of a cancelled wave is missing while that literal row is
 listed, the cells are written `Not run` even if one started before the cancel; the check returns
 to `queued` either way, and only the title differs.
+
+`unflip` runs as `<caller> / run / unflip` and reads the first stage `<caller> / run / waves /
+<first key>`. It prints no row when that stage's `complete` job of this attempt concluded
+`success` or `skipped`; otherwise it classifies that stage as `skipped` when no attempt lists a
+cell job of it, else as started, so a missing cell beside a listed one is retried.
 """
 
 import json
 import os
+import re
 import sys
 import unicodedata
 
@@ -95,8 +105,8 @@ def _row(check, ids, job=None):
 
 
 def unexpanded(jobs, level, attempt):
-    """Whether `jobs` holds a `cancelled` literal unexpanded wave row of `level` in run attempt
-    `attempt`. Every wave of a level shares that name, so the row does not say which wave."""
+    """Whether `jobs` holds a `cancelled` literal unexpanded cell matrix row of the stage path
+    `level` in run attempt `attempt`."""
     row = level + " / " + UNEXPANDED
     return bool(level) and any(
         j.get("name") == row
@@ -129,12 +139,11 @@ def _decide(check, ids, own, jobs, not_run):
     return _row(check, ids, {**saves[-1], "conclusion": "failure"})
 
 
-def classify(by_wave, results, jobs, job_id=""):
-    """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
-    result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
-    cells with no resolved row, each listed without one also getting an `unresolved` row."""
-    level = ag.level_of(jobs, job_id)
-    attempt = next((j.get("run_attempt") for j in jobs if str(j.get("id")) == str(job_id)), None)
+def classify(by_wave, results, jobs, level, attempt):
+    """`(rows, unresolved)` for the cells of the stages keyed in `results`, each stage's cell
+    matrix result, from the jobs listing `jobs`, reading the rows under the stage path `level` of
+    run attempt `attempt`: `unresolved` labels the cells with no resolved row, each listed
+    without one also getting an `unresolved` row."""
     literal = unexpanded(jobs, level, attempt)
     rows, unresolved = [], []
     for wave in sorted(results):
@@ -159,6 +168,36 @@ def classify(by_wave, results, jobs, job_id=""):
             if decided is None or decided.get("unresolved"):
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
     return rows, sorted(unresolved)
+
+
+def _own(jobs, job_id):
+    """The listed job `job_id` of `jobs`, or {} when it is not listed."""
+    return next((j for j in jobs if str(j.get("id")) == str(job_id)), {})
+
+
+def unflip(by_wave, jobs, job_id, key):
+    """`(rows, unresolved)` of the first stage `key` for `unflip`, the listed job `job_id`
+    (module docstring). Exits `UNRESOLVED_EXIT` when `jobs` does not list that job; refuses one
+    whose name does not end in the segment `unflip`, or a key that is not `apply-gate.STAGE`."""
+    own = _own(jobs, job_id)
+    if not own:
+        print(RETRY_PREFIX + "the run jobs listing does not list this unflip job", file=sys.stderr)
+        sys.exit(UNRESOLVED_EXIT)
+    name = own.get("name", "")
+    if name.split(" / ")[-1] != "unflip" or not re.fullmatch(ag.STAGE, key):
+        raise SystemExit("::error::unflip needs its own job named '... / unflip' and a stage key")
+    stage = name.removesuffix("unflip") + f"waves / {key}"
+    attempt = own.get("run_attempt")
+    if any(
+        j.get("name") == f"{stage} / complete"
+        and j.get("run_attempt") == attempt
+        and j.get("conclusion") in ("success", "skipped")
+        for j in jobs
+    ):
+        return [], []
+    cell_job = rf"{re.escape(stage)} / .+ / .+ / (?:apply|save)"
+    started = any(re.fullmatch(cell_job, j.get("name", "")) for j in jobs)
+    return classify(by_wave, {key: "started" if started else "skipped"}, jobs, stage, attempt)
 
 
 def error_line(job_id, repo):
@@ -305,31 +344,7 @@ def stranded(reasons_path):
     )
 
 
-MODES = {"list": (0, list_jobs), "plan": (1, plan), "stranded": (1, stranded), "own": (4, own)}
-
-
-def main(argv=()):
-    if argv:
-        count, mode = MODES.get(argv[0], (None, None))
-        if len(argv) - 1 != count:
-            raise SystemExit(
-                "::error::usage: apply-complete "
-                "[list | plan <rows> | stranded <reasons> | own <by_wave> <stack> <env> <job id>]"
-            )
-        mode(*argv[1:])
-        return
-    try:
-        results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
-    except ValueError:
-        results = None
-    if not isinstance(results, dict) or not results:
-        raise SystemExit("::error::wave-results must be a non-empty JSON object of wave results")
-    rows, unresolved = classify(
-        json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),
-        results,
-        ag.parse_jsonl(sys.stdin),
-        os.environ["SHIPMATE_JOB_ID"],
-    )
+def _print_rows(rows, unresolved):
     for row in rows:
         print(json.dumps(row))
     if unresolved:
@@ -340,6 +355,50 @@ def main(argv=()):
             file=sys.stderr,
         )
         sys.exit(UNRESOLVED_EXIT)
+
+
+def _unflip_mode(key):
+    jobs = ag.parse_jsonl(sys.stdin)
+    by_wave = json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"])
+    _print_rows(*unflip(by_wave, jobs, os.environ["SHIPMATE_JOB_ID"], key))
+
+
+MODES = {
+    "list": (0, list_jobs),
+    "plan": (1, plan),
+    "stranded": (1, stranded),
+    "own": (4, own),
+    "unflip": (1, _unflip_mode),
+}
+
+
+def main(argv=()):
+    if argv:
+        count, mode = MODES.get(argv[0], (None, None))
+        if len(argv) - 1 != count:
+            raise SystemExit(
+                "::error::usage: apply-complete [list | plan <rows> | stranded <reasons> | "
+                "own <by_wave> <stack> <env> <job id> | unflip <first key>]"
+            )
+        mode(*argv[1:])
+        return
+    if os.environ.get("SHIPMATE_ENTRY_PHASE") == "refused":
+        print(
+            "::notice::the stage was refused before its release, so no check is written",
+            file=sys.stderr,
+        )
+        return
+    try:
+        results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
+    except ValueError:
+        results = None
+    if not isinstance(results, dict) or not results:
+        raise SystemExit("::error::wave-results must be a non-empty JSON object of wave results")
+    jobs = ag.parse_jsonl(sys.stdin)
+    job_id = os.environ["SHIPMATE_JOB_ID"]
+    level = ag.level_of(jobs, job_id)
+    by_wave = json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"])
+    _print_rows(*classify(by_wave, results, jobs, level, _own(jobs, job_id).get("run_attempt")))
 
 
 if __name__ == "__main__":

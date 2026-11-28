@@ -5,11 +5,20 @@ inputs:
     description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
     required: true
   wave-results:
-    description: JSON object mapping each wave key to write to the result of its wave job. A cell with no job is not run when its wave is `skipped`, or `cancelled` with the level's `cancelled` literal matrix row listed and none of that wave's cells listed; any other cell with no job is retried and then left unwritten.
+    description: With `mode` `complete`, JSON object mapping this stage's key to the result of its cell matrix. A cell with no job is not run when its stage is `skipped`, or `cancelled` with the stage's `cancelled` literal matrix row listed and none of its cells listed; any other cell with no job is retried and then left unwritten. Unused by `unflip`.
     required: true
   job-id:
-    description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
+    description: This job's own check run id (`job.check_run_id`), whose listed name names its stage (`... / waves / L<i>-W<w> / complete`), or `... / run / unflip` with `mode` `unflip`.
     required: true
+  mode:
+    description: "`complete` writes the stage of this job; `unflip` writes the first stage, `first-key`, unless that stage's own `complete` job of this attempt succeeded or was skipped."
+    default: complete
+  first-key:
+    description: With `mode` `unflip`, the first stage's key.
+    default: ""
+  phase:
+    description: With `mode` `complete`, the stage `entry` job's `phase` output. `refused` writes nothing; `releasing` or empty writes the stage.
+    default: ""
   deploy:
     description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` and held entries, and a merged pull request gets only those."
     required: true
@@ -37,11 +46,19 @@ runs:
         SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
         SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
         SHIPMATE_JOB_ID: ${{ inputs.job-id }}
+        SHIPMATE_MODE: ${{ inputs.mode }}
+        SHIPMATE_FIRST_KEY: ${{ inputs.first-key }}
+        SHIPMATE_ENTRY_PHASE: ${{ inputs.phase }}
       # `apply-complete list` paginates because a 256-cell level exceeds the 100-per-page cap.
       # Unlike apply-summary's cosmetic listing, this one decides which checks complete, so it
       # never degrades to no data: that would silently strand every applied check pending.
       run: |
         set -euo pipefail
+        case "$SHIPMATE_MODE" in
+          complete) select=() ;;
+          unflip) select=(unflip "$SHIPMATE_FIRST_KEY") ;;
+          *) echo "::error::mode must be complete or unflip" >&2; exit 1 ;;
+        esac
         : > "$RUNNER_TEMP/rows.jsonl"
         : > "$RUNNER_TEMP/stranded.txt"
         ok=""
@@ -60,7 +77,7 @@ runs:
           # is classified: a truncated listing would write `Not run` over the cells it lost.
           if python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" list \
                > "$RUNNER_TEMP/jobs.jsonl" 2> "$RUNNER_TEMP/diagnostics.txt"; then
-            python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
+            python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" "${select[@]}" \
               < "$RUNNER_TEMP/jobs.jsonl" \
               > "$RUNNER_TEMP/attempt-rows.jsonl" \
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
