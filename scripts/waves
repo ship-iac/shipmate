@@ -33,6 +33,9 @@ from _shipmate import StackCycle
 #: GitHub's matrix cap: the stage matrix holds one row per stage, a stage's cell matrix one per
 #: cell.
 MATRIX_LIMIT = 256
+#: Linux refuses exec for one environment string over 128 KiB (`MAX_ARG_STRLEN`), and
+#: `verify-environments` and `apply-snapshot` take a whole env-level's stage map in one.
+ENV_STRING_LIMIT = 128_000
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
 _EDGE = re.compile(r"^\s*(\w+)\s*->\s*(\w+)")
 
@@ -158,7 +161,8 @@ def stage_outputs(order, deps, cells):
     - `cells`: a JSON list of every cell's `{stack, environment}`, in run order.
     - `empty`: true when there is no stage.
 
-    Refuses more than `MATRIX_LIMIT` stages, or a stage of more than `MATRIX_LIMIT` cells."""
+    Refuses more than `MATRIX_LIMIT` stages, a stage of more than `MATRIX_LIMIT` cells, or a
+    `levels` string over `ENV_STRING_LIMIT` UTF-8 bytes (`refuse_oversized_level`)."""
     env_level = env_levels(order, {c["environment"] for c in cells})
     graph_levels = stack_levels(deps)
     stages = {}
@@ -180,10 +184,13 @@ def stage_outputs(order, deps, cells):
                 "split the change."
             )
     populated = sorted({i for _, i, _ in rows})
+    level_maps = []
+    for lvl in populated:
+        text = json.dumps({k: s for k, i, s in rows if i == lvl})
+        refuse_oversized_level(text, lvl, sum(len(s) for _, i, s in rows if i == lvl))
+        level_maps.append(text)
     return {
-        "levels": json.dumps(
-            [json.dumps({k: s for k, i, s in rows if i == lvl}) for lvl in populated]
-        ),
+        "levels": json.dumps(level_maps),
         "stages": json.dumps(
             [
                 {
@@ -202,6 +209,18 @@ def stage_outputs(order, deps, cells):
         ),
         "empty": not rows,
     }
+
+
+def refuse_oversized_level(text, level, cells):
+    """Refuse env-level `level`'s stage map `text`, of `cells` cells, when it is over
+    `ENV_STRING_LIMIT` UTF-8 bytes: the step that reads it would fail at exec with no reason."""
+    size = len(text.encode("utf-8"))
+    if size > ENV_STRING_LIMIT:
+        raise SystemExit(
+            f"::error::env-level L{level} holds {cells} cells whose stage map is {size} bytes "
+            f"(> {ENV_STRING_LIMIT}), past what one environment variable carries; split the "
+            "change across pull requests so each env-level holds fewer cells."
+        )
 
 
 def _envs_of(tags, stack):

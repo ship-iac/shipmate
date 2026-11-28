@@ -992,6 +992,8 @@ def test_main_prints_the_dag_shape_notice_before_a_stage_count_refusal(
 
 def _long_bare(tmp_path, monkeypatch, length):
     """A bare apply of two dev-eu cells whose stack names are `length` characters long."""
+    # These one-level cells would trip the per-level limit `test_waves` pins before the cap.
+    monkeypatch.setattr(aad.wv, "ENV_STRING_LIMIT", 10**6)
     stacks = [f"stacks/{c * length}" for c in "ab"]
     return _run_main(
         tmp_path,

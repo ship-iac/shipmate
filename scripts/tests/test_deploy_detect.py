@@ -906,6 +906,8 @@ _LONG_PUSH = '{"stacks": ["' + "p" * 59_960 + '"], "outside": false}'
 
 
 def _long_deploy(tmp_path, monkeypatch):
+    # These one-level cells would trip the per-level limit `test_waves` pins before the cap.
+    monkeypatch.setattr(dd.wv, "ENV_STRING_LIMIT", 10**6)
     return _run_main(
         tmp_path,
         monkeypatch,

@@ -557,6 +557,8 @@ _ENV_CHARSET = (
 
 def _long_targeted(monkeypatch, tmp_path, length):
     """A targeted apply of two cells whose stack names are `length` characters long."""
+    # These one-level cells would trip the per-level limit `test_waves` pins before the cap.
+    monkeypatch.setattr(ad.wv, "ENV_STRING_LIMIT", 10**6)
     stacks = [f"stacks/{c * length}" for c in "ab"]
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {s: set() for s in stacks}, [_apply_check(s, cells=2) for s in stacks])

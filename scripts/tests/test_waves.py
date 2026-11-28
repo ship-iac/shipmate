@@ -278,6 +278,38 @@ def test_stage_outputs_allows_a_256_cell_stage_and_refuses_257():
     assert str(exc.value) == "::error::stage L0-W0 holds 257 cells (> 256); split the change."
 
 
+def _padded_level(size):
+    """One-cell `stage_outputs` input whose level string is exactly `size` bytes."""
+    cell = {"stack": "stacks/app", "environment": "dev", "pad": ""}
+    base = len(json.dumps({"L0-W0": [cell]}))
+    return [{**cell, "pad": "x" * (size - base)}]
+
+
+def test_stage_outputs_allows_a_128000_byte_level_and_refuses_128001():
+    """Mutations: drop the size check -- 128001 passes, red; `>=` -- 128000 refuses, red."""
+    ok = w.stage_outputs({}, {"stacks/app": set()}, _padded_level(128_000))
+    assert len(json.loads(ok["levels"])[0]) == 128_000
+    with pytest.raises(SystemExit) as exc:
+        w.stage_outputs({}, {"stacks/app": set()}, _padded_level(128_001))
+    assert str(exc.value) == (
+        "::error::env-level L0 holds 1 cells whose stage map is 128001 bytes (> 128000), past "
+        "what one environment variable carries; split the change across pull requests so each "
+        "env-level holds fewer cells."
+    )
+
+
+def test_refuse_oversized_level_counts_utf8_bytes_not_characters():
+    """64,001 characters, 128,002 UTF-8 bytes. `stage_outputs` escapes non-ASCII today, so this
+    pins the measure directly. Mutation: `len(text)` -- passes, red."""
+    with pytest.raises(SystemExit) as exc:
+        w.refuse_oversized_level("\xe9" * 64_001, 2, 7)
+    assert str(exc.value) == (
+        "::error::env-level L2 holds 7 cells whose stage map is 128002 bytes (> 128000), past "
+        "what one environment variable carries; split the change across pull requests so each "
+        "env-level holds fewer cells."
+    )
+
+
 def test_stack_levels_refuses_a_cycle_naming_it():
     """Mutation: return `levels(deps)` from `stack_levels` without the `CycleError` handler -- the
     raw `CycleError` is not a `SystemExit`."""

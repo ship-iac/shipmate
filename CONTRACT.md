@@ -4035,8 +4035,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   stages:
   `::error::the apply spans <n> stages (> 256), one per populated env-level and stack-wave pair; split the change.`;
   when a stage holds more than 256 cells:
-  `::error::stage <key> holds <n> cells (> 256); split the change.`; and when
-  its outputs total more than 500,000 characters:
+  `::error::stage <key> holds <n> cells (> 256); split the change.`; when one
+  env-level's stage map, `<i>` of its stage keys `L<i>-W<w>`, is more than
+  128,000 UTF-8 bytes, what one environment variable carries:
+  `::error::env-level L<i> holds <n> cells whose stage map is <m> bytes (> 128000), past what one environment variable carries; split the change across pull requests so each env-level holds fewer cells.`;
+  and when its outputs total more than 500,000 characters:
   `::error::the outputs for <n> cells total <m> characters (> 500000), past what a job's outputs carry; split the change.`
 - A cell `(stack, env)` runs after these cells of each stack its stack is
   `after`, directly or transitively. "The same environment" below is the
