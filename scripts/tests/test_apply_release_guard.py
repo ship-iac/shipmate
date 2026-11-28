@@ -218,11 +218,25 @@ def test_a_job_outside_its_own_stage_refuses_at_once(monkeypatch, listing):
 
 
 @pytest.mark.parametrize(
-    ("keys", "counts", "n"),
-    [(["L0-W0", "L0-W1"], [1], 1), (["L0-W0", "L0-W1"], [1, 1], 2), (["L0", "L0-W1"], [1, 1], 1)],
+    ("keys", "counts", "n", "job_id"),
+    [
+        (["L0-W0", "L0-W1"], [1], 1, str(OWN)),
+        (["L0-W0", "L0-W1"], [1, 1], 2, str(OWN)),
+        (["L0", "L0-W1"], [1, 1], 1, str(OWN)),
+        (["L0-W0", "L0-W1"], [0, 1], 1, str(OWN)),
+        (["L0-W0", "L0-W1"], [True, 1], 1, str(OWN)),
+        (["L0-W0", "L0-W1"], [1, 1], 1, f"{OWN}x"),
+    ],
+    ids=["lengths", "index", "key", "zero-count", "bool-count", "job-id"],
 )
-def test_malformed_stage_inputs_refuse(monkeypatch, listing, keys, counts, n):
-    """Mutation: drop the input check -> no such refusal."""
+def test_malformed_stage_inputs_refuse(monkeypatch, listing, keys, counts, n, job_id):
+    """Each case's listing would pass or wait without its clause. Mutations: drop the input
+    check -> no such refusal; drop `c > 0` -> zero-count passes; `isinstance(c, int)` for
+    `type(c) is int` -> bool-count passes; drop `job_id.isdigit()` -> job-id refuses
+    at the deadline with another reason."""
+    set_listings, _, _ = listing
+    set_listings([[*cell(APPLY, "L0-W0", "dns"), own(APPLY, "L0-W1")]])
+    monkeypatch.setenv("SHIPMATE_JOB_ID", job_id)
     assert guard(monkeypatch, keys, counts, n) == (
         "::error::the stage guard needs keys and counts, JSON lists of one length, a stage index "
         "n inside them and the calling job's id"
