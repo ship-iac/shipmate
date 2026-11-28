@@ -52,6 +52,8 @@ APPLY_PREFIX = "apply / "
 CALLER_PREFIX = "plan / "
 #: A stage's job name segment, `L<env level>-W<wave>`, under which its cell and stage jobs run.
 STAGE = r"L[0-9]+-W[0-9]+"
+#: `stage.yml`'s `cell` job name before GitHub expands its matrix.
+UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 #: The most cell names a refusal lists before eliding the rest.
 NAMED = 10
 DONE_CONCLUSIONS = {"success", "neutral"}
@@ -128,6 +130,13 @@ def stage_prefix(level):
     precedes it."""
     prefix, _, stage = level.rpartition(" / ")
     return prefix if re.fullmatch(STAGE, stage) else ""
+
+
+def unexpanded_rows(jobs, level):
+    """The listed jobs of `jobs` named `<level> / UNEXPANDED`, stage `level`'s cell matrix
+    row as GitHub lists it when the matrix never expanded; none when `level` is empty."""
+    name = f"{level} / {UNEXPANDED}"
+    return [j for j in jobs if level and j.get("name") == name]
 
 
 def cell_rows(jobs, level, stack, env):

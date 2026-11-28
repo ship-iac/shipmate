@@ -4030,7 +4030,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   earlier stage with `apply` and `save` jobs that succeeded; otherwise, after
   up to 2 minutes of re-reads, it refuses before its release with
   `::error::stage <key> cannot start: <reason>`, where `<reason>` names the
-  first unproven cell or the stage's observed and expected cell counts.
+  first unproven cell or the stage's observed and expected cell counts. An
+  earlier stage whose cell matrix ended unexpanded with no cell job refuses at
+  once: `the cell matrix of stage <key> never expanded: it concluded <conclusion>`.
 - Detect refuses before any cell runs when the apply spans more than 256
   stages:
   `::error::the apply spans <n> stages (> 256), one per populated env-level and stack-wave pair; split the change.`;

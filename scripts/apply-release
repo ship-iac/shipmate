@@ -6,10 +6,12 @@ key `keys[j]` lists exactly `SHIPMATE_STAGE_COUNTS[j]` cells (`<env> / <stack>`)
 and `save` jobs concluded `success`, read from this run attempt's jobs (`listed_jobs` with
 `attempt`, every page, carried jobs included) under the calling job's own prefix: the name
 `level_of` gives `SHIPMATE_JOB_ID`, which must end in ` / <own key>`. A concluded job that is not
-`success` refuses at once; fewer cells, an unconcluded job, an unreadable listing or one not
-listing the calling job re-lists every `GUARD_POLL` seconds and refuses `GUARD_DEADLINE`
-seconds after the first listing. A refusal is one `::error::` naming the stage and the cause:
-the observed cell, or the stage and its observed and expected cell counts; exit 1.
+`success` refuses at once, and so does an earlier stage with no cell rows whose unexpanded cell
+matrix row (`apply-gate.unexpanded_rows`) is listed concluded; fewer cells, an unconcluded job,
+an unreadable listing or one not listing the calling job re-lists every `GUARD_POLL` seconds and
+refuses `GUARD_DEADLINE` seconds after the first listing. A refusal is one `::error::` naming
+the stage and the cause: the observed cell, the stage and its observed and expected cell counts,
+or the stage whose cell matrix never expanded; exit 1.
 
 `release` flips stage `SHIPMATE_STAGE_KEY` of `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s
 `{stage key: {check name: [check id, ...]}}`, to `in_progress`, selected by exact key, refusing a
@@ -57,6 +59,22 @@ def flips(snapshot, url, started):
     ]
 
 
+def _shape_refusal(jobs, level, key, cells, count):
+    """Why stage `key` at `level`, listing `cells` cells of `count`, can never prove itself:
+    its cell matrix ended unexpanded (`apply-gate.unexpanded_rows` concluded, no cell rows) or
+    it lists more cells than `count`; "" otherwise."""
+    ended = [
+        j.get("conclusion")
+        for j in ag.unexpanded_rows(jobs, level)
+        if j.get("status") == "completed"
+    ]
+    if ended and not cells:
+        return f"the cell matrix of stage {key} never expanded: it concluded {ended[0]}"
+    if cells > count:
+        return f"stage {key} lists {cells} cells, not {count}"
+    return ""
+
+
 def guard_verdict(jobs, prefix, keys, counts, n):
     """`("pass" | "wait" | "refuse", reason)` for stage `keys[n]` under `prefix` (the name
     before the stage segment) over the listed `jobs`: the rule of the module docstring. The
@@ -82,8 +100,9 @@ def guard_verdict(jobs, prefix, keys, counts, n):
                 )
             else:
                 waits.append(f"cell {cell} of stage {key} has no conclusion in its {part} job")
-        if len(parts) > count:
-            return "refuse", f"stage {key} lists {len(parts)} cells, not {count}"
+        refusal = _shape_refusal(jobs, f"{prefix} / {key}", key, len(parts), count)
+        if refusal:
+            return "refuse", refusal
         applied = sum(done == {"apply", "save"} for done in parts.values())
         if applied < count:
             waits.append(f"stage {key} lists {applied} of {count} cells applied and saved")

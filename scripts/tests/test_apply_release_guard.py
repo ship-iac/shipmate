@@ -217,6 +217,42 @@ def test_a_job_outside_its_own_stage_refuses_at_once(monkeypatch, listing):
     assert sleeps == []
 
 
+#: Stage L0-W0's cell matrix row as GitHub lists it when the matrix never expanded.
+LITERAL = f"{APPLY} / L0-W0 / ${{{{ matrix.environment }}}} / ${{{{ matrix.stack }}}}"
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "skipped"])
+def test_an_earlier_stage_whose_matrix_never_expanded_refuses_at_once(
+    monkeypatch, listing, conclusion
+):
+    """A concluded literal row and no cell row can never prove the stage. Mutations: treat it as
+    a wait -- refuses after twelve sleeps with the count reason; refuse on a literal row beside
+    cell rows (drop `not cells`) -- the other test's listing refuses."""
+    set_listings, sleeps, _ = listing
+    set_listings([[row(LITERAL, conclusion), own(APPLY, "L0-W1")]])
+    assert guard(monkeypatch, ["L0-W0", "L0-W1"], [1, 1], 1) == (
+        f"::error::stage L0-W1 cannot start: the cell matrix of stage L0-W0 never expanded: it "
+        f"concluded {conclusion}"
+    )
+    assert sleeps == []
+
+
+def test_an_unconcluded_literal_row_still_waits(monkeypatch, listing):
+    """A queued literal row expands later; then the cell rows prove the stage. A concluded one
+    beside the cell rows refuses nothing. Mutation: drop the `completed` filter -- refused at
+    once."""
+    set_listings, sleeps, _ = listing
+    queued = row(LITERAL, None, "queued")
+    set_listings(
+        [
+            [queued, own(APPLY, "L0-W1")],
+            [row(LITERAL, "success"), *cell(APPLY, "L0-W0", "dns"), own(APPLY, "L0-W1")],
+        ]
+    )
+    assert guard(monkeypatch, ["L0-W0", "L0-W1"], [1, 1], 1) is None
+    assert sleeps == [10]
+
+
 @pytest.mark.parametrize(
     ("keys", "counts", "n", "job_id"),
     [

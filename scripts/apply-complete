@@ -89,7 +89,6 @@ UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # of stderr to annotate what it gave up on after its retries, so it is a line-anchored
 # contract, not a message.
 RETRY_PREFIX = "retry: "
-UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 ERROR_LINE_CAP = 120
 
 
@@ -107,12 +106,9 @@ def _row(check, ids, job=None):
 def unexpanded(jobs, level, attempt):
     """Whether `jobs` holds a `cancelled` literal unexpanded cell matrix row of the stage path
     `level` in run attempt `attempt`."""
-    row = level + " / " + UNEXPANDED
-    return bool(level) and any(
-        j.get("name") == row
-        and j.get("conclusion") == "cancelled"
-        and j.get("run_attempt") == attempt
-        for j in jobs
+    return any(
+        j.get("conclusion") == "cancelled" and j.get("run_attempt") == attempt
+        for j in ag.unexpanded_rows(jobs, level)
     )
 
 
