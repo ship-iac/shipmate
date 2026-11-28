@@ -2561,7 +2561,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `actions/summary`, completed by `actions/cell-complete` in each cell's `save`
   job in `cell.yml`, by `actions/apply-complete` in `stage.yml`'s
   `complete` job, and by `apply-run.yml`'s `unflip` for
-  a first stage whose own `complete` did not finish (all
+  a first stage whose own `complete` did not succeed and was not skipped (all
   bound to `shipmate-engine`) — creator and completers each mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity

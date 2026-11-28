@@ -292,7 +292,7 @@ as above, and step 5 runs in every consumer repository.
   of the cell that applied it, or by the stage's `complete` job when the
   stage's `entry` job or one of its cells failed or was cancelled, or in
   `apply-run.yml`'s `unflip` job when the first stage's own `complete` did
-  not finish), the
+  not succeed and was not skipped), the
   `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
