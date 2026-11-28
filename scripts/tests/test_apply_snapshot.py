@@ -544,3 +544,56 @@ def test_plan_runs_compare_as_numbers(plan_run, other_run, expected):
         check("apply / dev / dns", 2, plan_run=other_run),
     ]
     assert apply_snapshot.snapshot(waves, runs, APP_ID) == {"apply / dev / dns": expected}
+
+
+#: Two stages; only `L0-W0`'s cell has an apply check.
+_STAGES = {"L0-W0": [row("dns", "dev")], "L0-W1": [row("app", "dev")]}
+
+_NO_STAGE = (
+    "::error::stage `L0-W9` is none of the 2 stages in the wave matrices, so it cannot be "
+    "checked alone; refusing to apply."
+)
+
+
+def _run_main(monkeypatch, tmp_path, key):
+    out = tmp_path / "out.txt"
+    monkeypatch.setenv("SHIPMATE_APP_ID", str(APP_ID))
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(_STAGES))
+    monkeypatch.setenv("SHIPMATE_STAGE_KEY", key)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    stdin = io.StringIO(json.dumps(check("apply / dev / dns", 1)))
+    monkeypatch.setattr(apply_snapshot.sys, "stdin", stdin)
+    apply_snapshot.main()
+    return out.read_text(encoding="utf-8")
+
+
+def test_a_stage_key_snapshots_only_that_stage(monkeypatch, tmp_path):
+    """The sibling stage's cell has no check, so only a narrowed snapshot passes. Mutation:
+    ignore `SHIPMATE_STAGE_KEY` and snapshot the whole map -- the sibling refuses, red."""
+    assert _run_main(monkeypatch, tmp_path, "L0-W0") == (
+        'by_wave={"L0-W0": {"apply / dev / dns": [1]}}\n'
+    )
+
+
+def test_a_stage_key_the_map_lacks_refuses(monkeypatch, tmp_path):
+    """Mutation: fall back to the whole map for a key it lacks -- the sibling's missing check
+    refuses instead, red."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, "L0-W9")
+    assert str(exc.value) == _NO_STAGE
+
+
+def test_the_key_input_reaches_the_script():
+    """Mutation: rename the step's `SHIPMATE_STAGE_KEY` env -- red."""
+    action = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")
+    assert action["inputs"]["key"] == {
+        "description": (
+            "One stage key of `waves-json` to snapshot alone; empty snapshots every stage. A key "
+            "the map lacks refuses."
+        ),
+        "required": False,
+        "default": "",
+    }
+    assert step_by("apply-snapshot", id="snap")["env"]["SHIPMATE_STAGE_KEY"] == (
+        "${{ inputs.key }}"
+    )

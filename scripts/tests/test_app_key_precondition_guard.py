@@ -193,6 +193,7 @@ _SNAPSHOT_SNAP = {
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_STAGE_KEY": "${{ inputs.key }}",
         "COUNTED": "${{ inputs.counted }}",
     },
     "run": (

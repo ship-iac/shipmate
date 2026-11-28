@@ -13,6 +13,10 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  key:
+    description: One stage key of `waves-json` to snapshot alone; empty snapshots every stage. A key the map lacks refuses.
+    required: false
+    default: ""
   counted:
     description: '"true" refuses a check-run listing that holds fewer rows than its total_count.'
     required: false
@@ -39,6 +43,7 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_STAGE_KEY: ${{ inputs.key }}
         COUNTED: ${{ inputs.counted }}
       run: |
         set -euo pipefail
