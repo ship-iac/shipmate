@@ -2139,8 +2139,8 @@ WARMING = {
     "detect": "completed",
     "warm / stacks/app": "in_progress",
     "warm / tools": "queued",
-    "L0 / dev / stacks/app / apply": "completed",
-    "L0 / dev / stacks/app / save": "completed",
+    "waves / L0-W0 / dev / stacks/app / apply": "completed",
+    "waves / L0-W0 / dev / stacks/app / save": "completed",
     "summary": "completed",
 }
 
@@ -2188,7 +2188,7 @@ def test_evict_proceeds_past_a_deploy_run_only_warming(monkeypatch, tmp_path, ca
     ("job", "status"),
     [
         pytest.param("detect", "in_progress", id="detect"),
-        pytest.param("L0 / dev / stacks/app / apply", "waiting", id="cell"),
+        pytest.param("waves / L0-W0 / dev / stacks/app / apply", "waiting", id="cell"),
         pytest.param("summary", "queued", id="summary"),
         pytest.param("summary", None, id="summary-not-listed"),
     ],
@@ -3103,7 +3103,7 @@ def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch
 
 
 OWN_JOBS = ["gh", "api", f"repos/{REPO}/actions/runs/900/jobs?filter=all&per_page=100&page=1"]
-_CELL = "deploy / L0 / dev / stacks/auth"
+_CELL = "deploy / waves / L0-W0 / dev / stacks/auth"
 #: This attempt's own `apply` row, whose id the pre-apply step receives as `JOB_ID`.
 OWN_ROW = {
     "id": 7,
@@ -3168,6 +3168,24 @@ def test_verify_deploy_refuses_a_cell_an_earlier_attempt_applied_unsaved(monkeyp
     )
 
 
+def test_verify_deploy_refuses_a_cell_applied_unsaved_in_another_stage(monkeypatch, tmp_path):
+    """A changed `needs` edge moved the cell from `L0-W1` (attempt 1) to `L0-W2` (this
+    attempt). Mutation: read the rows of this job's stage only (`cell_rows` at `level_of`)
+    -- passes, red."""
+    jobs = json.loads(_own_jobs("failure"))["jobs"]
+    jobs = [
+        {**j, "name": j["name"].replace("L0-W0", "L0-W1" if j["run_attempt"] == 1 else "L0-W2")}
+        for j in jobs
+    ]
+    listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, RERUN) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: run attempt 1 of this deploy may "
+        "have applied this cell without saving its state; follow docs/troubleshooting.md "
+        "section The apply step ran and its state was not saved"
+    )
+
+
 def test_verify_deploy_names_every_earlier_attempt_that_applied_unsaved(monkeypatch, tmp_path):
     """Mutation: write `run attempt` whatever the count -- red."""
     first = json.loads(_own_jobs("failure"))["jobs"][:2]
@@ -3224,7 +3242,7 @@ def test_verify_deploy_reads_no_jobs_on_the_first_attempt(monkeypatch, tmp_path)
 def test_verify_deploy_refuses_a_rerun_whose_attempts_it_cannot_read(
     monkeypatch, tmp_path, listing, job_id
 ):
-    """Mutation: drop the `if not level` refusal (an unreadable listing reads as no rows) --
+    """Mutation: drop the `if not prefix` refusal (an unreadable listing reads as no rows) --
     every case passes. Mutation: drop `counted=True` -- short passes."""
     gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
     assert _verify_refusal(monkeypatch, tmp_path, gh, {**RERUN, "JOB_ID": job_id}) == (

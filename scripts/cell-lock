@@ -979,19 +979,19 @@ def _verify_deploy(repo, pr, env, stack, where, run):
 
 def _verify_earlier_attempts(repo, env, stack, where, run):
     """On a re-run of the deploy, refuse when `ag.unsaved` names an earlier attempt of this cell
-    at this job's level (`JOB_ID`, its check run id) in the run's `filter=all` listing: a
-    re-run restores the state that attempt's apply may have replaced. A listing that fails, is
-    short of its count, or does not list this job refuses too."""
+    in any stage under this job's caller (`JOB_ID`, its check run id) in the run's `filter=all`
+    listing: a re-run restores the state that attempt's apply may have replaced. A listing that
+    fails, is short of its count, or does not list this job refuses too."""
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
     if attempt == "1":
         return
 
     def read():
         jobs = listed_jobs(repo, os.environ["GITHUB_RUN_ID"], run, counted=True, job_filter="all")
-        level = ag.level_of(jobs or [], os.environ.get("JOB_ID", ""))
-        if not level:
+        prefix = ag.stage_prefix(ag.level_of(jobs or [], os.environ.get("JOB_ID", "")))
+        if not prefix:
             raise SystemExit("the run's job listing failed or does not list this job")
-        rows = ag.cell_rows(jobs, level, stack, env)
+        rows = ag.cell_rows_any_stage(jobs, prefix, stack, env)
         return ag.unsaved(rows["apply"] + rows["save"], stack, env, before=int(attempt))
 
     what = "which earlier attempts of this deploy applied this cell"

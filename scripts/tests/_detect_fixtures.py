@@ -529,7 +529,7 @@ def cell_job(part, steps=(("Apply the cell", "success"),), conclusion="success")
     """The listed `apply` or `save` job (`part`) of `stacks/app / dev-eu` in an apply run,
     attempt 1, with `steps` as `(name, conclusion)` pairs."""
     return {
-        "name": f"apply / run / L0 / dev-eu / stacks/app / {part}",
+        "name": f"apply / run / waves / L0-W0 / dev-eu / stacks/app / {part}",
         "status": "completed",
         "conclusion": conclusion,
         "run_attempt": 1,
@@ -553,6 +553,8 @@ def holder_answers(repo, run, jobs=None):
 
 
 _ENDED = {"status": "completed", "run_attempt": 1}
+#: The cell's jobs as an engine before stages named them, which no reader matches.
+_LEVEL_SHAPE = "apply / run / L0 / dev-eu / stacks/app"
 _BY_HAND = "docs/troubleshooting.md section Return an in-progress apply check by hand"
 _UNREADABLE = (
     "::error::apply refused: stacks/app / dev-eu: run 77 could not be read completely; "
@@ -594,7 +596,21 @@ HELD_CASES = {
     "old job shape": (
         "",
         _ENDED,
-        [{**cell_job("apply"), "name": "apply / run / L0 / dev-eu / stacks/app"}],
+        [{**cell_job("apply"), "name": "apply / run / waves / L0-W0 / dev-eu / stacks/app"}],
+        (
+            "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
+            "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
+            "state was not saved, then return or complete each check as in docs/troubleshooting.md "
+            "section Return an in-progress apply check by hand."
+        ),
+    ),
+    "level job shape": (
+        "",
+        _ENDED,
+        [
+            {**cell_job(p, steps=(("Apply the cell", "skipped"),)), "name": f"{_LEVEL_SHAPE} / {p}"}
+            for p in ("apply", "save")
+        ],
         (
             "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
             "saving their state; follow docs/troubleshooting.md section The apply step ran and its "

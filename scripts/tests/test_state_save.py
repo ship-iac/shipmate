@@ -36,7 +36,7 @@ ss = load_script("state-save")
 
 PATH = "stacks/app/.state/dev-eu/terraform.tfstate"
 CIPHER = b"SHPS1" + b"\x00\x01\xff" * 30
-LEVEL = "apply / run / L0"
+LEVEL = "apply / run / waves / L0-W0"
 APPLY = f"{LEVEL} / dev-eu / stacks/app / apply"
 SAVE = f"{LEVEL} / dev-eu / stacks/app / save"
 STARTED = [
@@ -531,6 +531,19 @@ def test_rerun_all_jobs_looks_up_the_unsaved_attempt(monkeypatch, tmp_path):
     """ "Re-run all jobs": attempt 2's pre-apply refuses, so `apply` reports `not-applied`, and
     attempt 1 is still unsaved. Mutation: `skip` on `not-applied` whatever the attempt."""
     jobs = [_A1, _save(1, "failure"), _apply(2, NOT_STARTED, conclusion="failure"), _save(2, None)]
+    job = _Job(monkeypatch, tmp_path, state="not-applied attempt=2", attempt=2, jobs=jobs, **_one())
+    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH, "slug": "stacks-app"})
+
+
+def test_a_cell_that_moved_stage_looks_up_the_earlier_stages_attempt(monkeypatch, tmp_path):
+    """A changed `needs` edge moved the cell from `L0-W1` (attempt 1) to `L0-W2` (attempt 2).
+    Mutation: read the rows of this job's stage only (`cell_rows` at `level_of`) -- skips,
+    red."""
+    earlier = [_A1, _save(1, "failure")]
+    own = [_apply(2, NOT_STARTED, conclusion="failure"), _save(2, None)]
+    jobs = [{**j, "name": j["name"].replace("L0-W0", "L0-W1")} for j in earlier] + [
+        {**j, "name": j["name"].replace("L0-W0", "L0-W2")} for j in own
+    ]
     job = _Job(monkeypatch, tmp_path, state="not-applied attempt=2", attempt=2, jobs=jobs, **_one())
     assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH, "slug": "stacks-app"})
 

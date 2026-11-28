@@ -809,7 +809,7 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             "completed",
             [
                 _job(
-                    name="deploy / L0 / dev-us / stacks/app / apply",
+                    name="deploy / waves / L0-W0 / dev-us / stacks/app / apply",
                     steps=[],
                     conclusion="cancelled",
                 )
@@ -1942,9 +1942,9 @@ _LIVE = (
 
 
 #: The cell's job names in a deploy, `<level> / <env> / <stack> / <part>`.
-APP_APPLY = "deploy / L0 / dev-eu / stacks/app / apply"
-APP_SAVE = "deploy / L0 / dev-eu / stacks/app / save"
-WEB_APPLY = "deploy / L0 / dev-eu / stacks/web / apply"
+APP_APPLY = "deploy / waves / L0-W0 / dev-eu / stacks/app / apply"
+APP_SAVE = "deploy / waves / L0-W0 / dev-eu / stacks/app / save"
+WEB_APPLY = "deploy / waves / L0-W0 / dev-eu / stacks/web / apply"
 _STARTS = itertools.count()
 #: `(name, conclusion)` steps of an `apply` job whose apply step ran.
 _RAN = [("Set up job", "success"), ("Apply the cell", "success")]
@@ -2244,7 +2244,7 @@ def test_the_held_check_apply_complete_writes_refuses_as_a_state_loss(tmp_path, 
     }.items():
         monkeypatch.setenv(k, v)
     listing = [
-        {**_job("deploy / L0 / complete"), "id": 5},
+        {**_job("deploy / waves / L0-W0 / complete"), "id": 5},
         {**_job(), "id": 6},
         {**_save("failure"), "id": 7},
     ]
@@ -2295,7 +2295,9 @@ _BAD_ATTEMPTS = [None, True, "2"]
         (_holder("completed", []), (1, 1)),
         (
             _holder(
-                "completed", [_job(name="apply / run / L0 / dev-eu / stacks/web / apply")], total=2
+                "completed",
+                [_job(name="apply / run / waves / L0-W0 / dev-eu / stacks/web / apply")],
+                total=2,
             ),
             (1, 1),
         ),

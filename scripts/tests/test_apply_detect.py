@@ -1769,7 +1769,9 @@ def test_a_targeted_apply_refuses_a_cell_another_run_holds_unless_it_never_appli
     -- every refusing case applies, red. Mutation: `counted=False` in `_holding_run` -- short
     listing, red. Mutation: `if jobs is None` for `if newest is None` in `_holding_run` --
     empty listing, red. Mutation: drop `not mine or` in `holder_state` -- a listing with no
-    row of the cell's job grammar (an older engine's `L0 / <env> / <stack>`) applies, red."""
+    row of the cell's job grammar (`<stage> / <env> / <stack>` with no part, or an older
+    engine's `L0 / <env> / <stack> / <part>` that never applied) applies, red. Mutation:
+    `cell_part` accepts `L[0-9]+` as the stage -- the older engine's listing applies, red."""
     out = _apply_env(monkeypatch, tmp_path)
     answers = [*base_answers("acme/iac"), *holder_answers("acme/iac", run, jobs)]
     _stub_apply(
@@ -1816,7 +1818,7 @@ def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch
     ac, pc = load_script("apply-complete"), load_script("patch-checks")
     out = _apply_env(monkeypatch, tmp_path, GITHUB_RUN_ID=HOLDER)
     listing = [
-        {**cell_job("apply", steps=()), "name": "apply / run / L0 / complete", "id": 5},
+        {**cell_job("apply", steps=()), "name": "apply / run / waves / L0-W0 / complete", "id": 5},
         {**cell_job("apply"), "id": 6},
         {**cell_job("save", steps=(), conclusion="failure"), "id": 7},
     ]

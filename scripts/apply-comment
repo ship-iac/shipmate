@@ -460,7 +460,7 @@ def _cell_line(row, url, env=None):
 
 def _job_url(row, jobs, run_url, part="apply"):
     """Per-cell log link: the row's cell job `part` (`apply` or `save`), the job
-    `apply-gate.cell_part` matches by its `L<n> / <env> / <stack> / <part>` name. No match ->
+    `apply-gate.cell_part` matches by its `<stage> / <env> / <stack> / <part>` name. No match ->
     the workflow-run URL."""
     url = None
     for job in jobs:

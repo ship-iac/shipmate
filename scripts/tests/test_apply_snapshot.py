@@ -44,20 +44,20 @@ def _job(jid, name, conclusion, steps=()):
     }
 
 
-#: A wave completion job's listing: itself, `L0 / complete` (id 900), and the `dns` / `dev`
+#: A wave completion job's listing: itself, `L0-W0 / complete` (id 900), and the `dns` / `dev`
 #: cell's `apply` (id 9, its apply step ran) and `save`, both succeeded.
 JOBS = [
-    _job(900, "L0 / complete", None),
+    _job(900, "L0-W0 / complete", None),
     _job(
         9,
-        "L0 / dev / dns / apply",
+        "L0-W0 / dev / dns / apply",
         "success",
         [
             {"name": "Pre-apply check", "conclusion": "success"},
             {"name": "Apply the cell", "conclusion": "success"},
         ],
     ),
-    _job(10, "L0 / dev / dns / save", "success"),
+    _job(10, "L0-W0 / dev / dns / save", "success"),
 ]
 
 

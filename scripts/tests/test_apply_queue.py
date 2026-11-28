@@ -41,7 +41,7 @@ def _r(id_, ref=_OLD, by_app=True, status="pending", comment="11"):
 def _j(*statuses):
     """Wave cells of the `run` call, named as a jobs listing names them."""
     return [
-        {"name": f"apply / run / L0 / dev / s{i} / apply", "status": s}
+        {"name": f"apply / run / waves / L0-W0 / dev / s{i} / apply", "status": s}
         for i, s in enumerate(statuses)
     ]
 
@@ -57,7 +57,8 @@ def _job(name, status):
 
 
 def _save(cell, status, steps=()):
-    """The `save` job of cell `cell` (`L<n> / <env> / <stack>`) with the step names `steps`."""
+    """The `save` job of cell `cell` (`waves / <stage> / <env> / <stack>`) with the step names
+    `steps`."""
     return {**_job(f"{cell} / save", status), "steps": [{"name": n} for n in steps]}
 
 
@@ -300,8 +301,8 @@ def test_the_holder_is_named_over_an_older_waiting_run_and_cancels_share_one_rep
     gh.runs = [_r(30, ref=_HEAD), _r(40), _r(45, ref=_HEAD), _r(60, ref=_HEAD)]
     gh.jobs = {
         30: ([_rv("pending")], True),
-        40: ([_rv("completed"), _job("L0 / dev / app / apply", "waiting")], True),
-        45: ([_rv("completed"), _job("L0 / dev / app / apply", "in_progress")], True),
+        40: ([_rv("completed"), _job("waves / L0-W0 / dev / app / apply", "waiting")], True),
+        45: ([_rv("completed"), _job("waves / L0-W0 / dev / app / apply", "in_progress")], True),
         60: ([_rv("pending")], True),
     }
     gh.go()
@@ -425,7 +426,7 @@ def test_a_malformed_jobs_listing_keeps_its_run_and_the_queue_still_replies(gh, 
     import _shipmate
 
     listings = {
-        40: [{"name": "apply / run / L0 / prod / app / apply", "status": "waiting"}],
+        40: [{"name": "apply / run / waves / L0-W0 / prod / app / apply", "status": "waiting"}],
         45: [{"name": "apply / run / review", "status": "in_progress"}, {"status": "pending"}],
     }
 
@@ -451,7 +452,7 @@ def test_a_jobs_listing_short_of_its_count_cancels_nothing(gh, monkeypatch):
     import _shipmate
 
     def gh_run(argv):
-        jobs = [{"name": "apply / run / L0 / prod / app / apply", "status": "waiting"}]
+        jobs = [{"name": "apply / run / waves / L0-W0 / prod / app / apply", "status": "waiting"}]
         return json.dumps({"total_count": 2, "jobs": jobs})
 
     monkeypatch.setattr(aq, "run_jobs", lambda repo, rid: _shipmate.run_jobs(repo, rid, gh_run))
@@ -470,7 +471,11 @@ def test_a_run_whose_summary_waits_after_its_cells_applied_is_kept(gh):
     and the gate refresh. Mutation: a non-cell unfinished job no longer keeps the run
     (`not _is_cell(j) or j["status"] == "waiting"` in `idle`) -- red."""
     gh.runs, gh.jobs = _stale(
-        [_rv("completed"), _job("L0 / dev / app / apply", "completed"), _job("summary", "pending")]
+        [
+            _rv("completed"),
+            _job("waves / L0-W0 / dev / app / apply", "completed"),
+            _job("summary", "pending"),
+        ]
     )
     gh.go()
     assert gh.cancels == []
@@ -483,9 +488,9 @@ def test_a_wave_pending_on_its_cell_group_after_an_earlier_wave_applied_is_kept(
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / dev / dns / apply", "completed"),
-            _job("L1 / dev / app / apply", "pending"),
-            _save("L1 / dev / app", "pending"),
+            _job("waves / L0-W0 / dev / dns / apply", "completed"),
+            _job("waves / L1-W0 / dev / app / apply", "pending"),
+            _save("waves / L1-W0 / dev / app", "pending"),
         ]
     )
     gh.go()
@@ -504,7 +509,11 @@ def test_a_run_whose_call_waits_for_the_group_is_cancelled(gh):
 def test_a_run_whose_cell_waits_on_an_approval_is_cancelled(gh):
     """Mutation: compare `== "pending"` for `== "waiting"` in `idle` -- red (kept)."""
     gh.runs, gh.jobs = _stale(
-        [_rv("completed"), _job("detect", "completed"), _job("L0 / prod / app / apply", "waiting")]
+        [
+            _rv("completed"),
+            _job("detect", "completed"),
+            _job("waves / L0-W0 / prod / app / apply", "waiting"),
+        ]
     )
     gh.go()
     assert gh.cancels == [_cancel(40)]
@@ -517,8 +526,8 @@ def test_a_cell_waiting_on_an_approval_with_its_save_row_is_cancelled(gh):
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / app / apply", "waiting"),
-            _save("L0 / prod / app", "pending"),
+            _job("waves / L0-W0 / prod / app / apply", "waiting"),
+            _save("waves / L0-W0 / prod / app", "pending"),
         ]
     )
     gh.go()
@@ -531,8 +540,8 @@ def test_a_save_listing_a_step_keeps_the_run(gh):
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / app / apply", "waiting"),
-            _save("L0 / prod / app", "pending", ["Set up job"]),
+            _job("waves / L0-W0 / prod / app / apply", "waiting"),
+            _save("waves / L0-W0 / prod / app", "pending", ["Set up job"]),
         ]
     )
     gh.go()
@@ -542,9 +551,11 @@ def test_a_save_listing_a_step_keeps_the_run(gh):
 def test_a_save_listed_without_steps_keeps_the_run(gh):
     """A listing that omits `steps` does not show the `save` unstarted. Mutation: read a
     missing `steps` as none (`not job.get("steps")`) -- red (cancelled)."""
-    save = _save("L0 / prod / app", "pending")
+    save = _save("waves / L0-W0 / prod / app", "pending")
     del save["steps"]
-    gh.runs, gh.jobs = _stale([_rv("completed"), _job("L0 / prod / app / apply", "waiting"), save])
+    gh.runs, gh.jobs = _stale(
+        [_rv("completed"), _job("waves / L0-W0 / prod / app / apply", "waiting"), save]
+    )
     gh.go()
     assert gh.cancels == []
 
@@ -555,8 +566,8 @@ def test_a_save_queued_after_its_apply_completed_keeps_the_run(gh):
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / app / apply", "completed"),
-            _save("L0 / prod / app", "queued"),
+            _job("waves / L0-W0 / prod / app / apply", "completed"),
+            _save("waves / L0-W0 / prod / app", "queued"),
         ]
     )
     gh.go()
@@ -569,8 +580,8 @@ def test_a_save_in_progress_keeps_the_run(gh):
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / app / apply", "completed"),
-            _save("L0 / prod / app", "in_progress", ["Set up job"]),
+            _job("waves / L0-W0 / prod / app / apply", "completed"),
+            _save("waves / L0-W0 / prod / app", "in_progress", ["Set up job"]),
         ]
     )
     gh.go()
@@ -579,12 +590,15 @@ def test_a_save_in_progress_keeps_the_run(gh):
 
 
 def test_a_cell_under_a_caller_name_holding_a_separator_keeps_the_run(gh):
-    """Caller `outer / apply` gives seven segments. Mutation: `_cell_part` drops its segment
+    """Caller `outer / apply` gives eight segments. Mutation: `_cell_part` drops its segment
     checks and reads `ag.cell_part(name, segments[-2], segments[-3])` -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(
         [
             {"name": "outer / apply / run / review", "status": "completed"},
-            {"name": "outer / apply / run / L0 / prod / app / apply", "status": "waiting"},
+            {
+                "name": "outer / apply / run / waves / L0-W0 / prod / app / apply",
+                "status": "waiting",
+            },
         ]
     )
     gh.go()
@@ -592,13 +606,13 @@ def test_a_cell_under_a_caller_name_holding_a_separator_keeps_the_run(gh):
 
 
 def test_a_waiting_release_job_is_not_a_cell_and_keeps_the_run(gh):
-    """A wave's release job is named by its id, four segments under the caller. Mutation:
-    `_cell_part` returns `"apply"` for any job with `L<n>` third -- red (cancelled)."""
+    """A stage's `entry` job, five segments under the caller, is no cell. Mutation:
+    `_cell_part` returns `"apply"` for any job with a stage fourth -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / app / apply", "waiting"),
-            _job("L0 / wave1-release", "waiting"),
+            _job("waves / L0-W0 / prod / app / apply", "waiting"),
+            _job("waves / L0-W1 / entry", "waiting"),
         ]
     )
     gh.go()
@@ -611,8 +625,8 @@ def test_a_run_with_one_cell_waiting_and_one_pending_is_kept(gh):
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / prod / a / apply", "waiting"),
-            _job("L0 / prod / b / apply", "pending"),
+            _job("waves / L0-W0 / prod / a / apply", "waiting"),
+            _job("waves / L0-W0 / prod / b / apply", "pending"),
         ]
     )
     gh.go()
@@ -631,13 +645,13 @@ def test_a_run_left_only_in_outcome_is_not_named(gh):
 
 def test_a_pending_cell_of_env_run_and_stack_review_is_not_the_group_wait(gh):
     """Env `run` and root stack `review` give a cell named
-    `apply / run / L1 / run / review / apply`. Mutation: match the review job by
+    `apply / run / waves / L1-W0 / run / review / apply`. Mutation: match the review job by
     `"run / review" in job["name"]` -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
-            _job("L0 / dev / dns / apply", "completed"),
-            _job("L1 / run / review / apply", "pending"),
+            _job("waves / L0-W0 / dev / dns / apply", "completed"),
+            _job("waves / L1-W0 / run / review / apply", "pending"),
         ]
     )
     gh.go()
@@ -648,7 +662,11 @@ def test_a_waiting_job_that_is_not_a_cell_keeps_the_run(gh):
     """`summary` `waiting` as the only unfinished job is no approval of a cell. Mutation: drop
     the `_is_cell` filter from `idle` -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(
-        [_rv("completed"), _job("L0 / dev / app / apply", "completed"), _job("summary", "waiting")]
+        [
+            _rv("completed"),
+            _job("waves / L0-W0 / dev / app / apply", "completed"),
+            _job("summary", "waiting"),
+        ]
     )
     gh.go()
     assert gh.cancels == []
@@ -690,7 +708,10 @@ def _behind(own_jobs):
         [_r(40), _r(45, ref=_HEAD)],
         {
             40: (_j("waiting"), True),
-            45: ([_rv("completed"), _job("L0 / dev / app / apply", "in_progress")], True),
+            45: (
+                [_rv("completed"), _job("waves / L0-W0 / dev / app / apply", "in_progress")],
+                True,
+            ),
         },
         own_jobs,
     )
@@ -1081,7 +1102,7 @@ def test_a_call_whose_unflip_runs_after_every_level_ended_holds_the_group():
         _rv("completed"),
         _job("detect", "completed"),
         _job("lock", "completed"),
-        _job("L0 / dev / app / apply", "completed"),
+        _job("waves / L0-W0 / dev / app / apply", "completed"),
         _job("unflip", "in_progress"),
     ]
     assert (aq.idle(jobs), aq.holds(jobs)) == (False, True)
@@ -1096,10 +1117,28 @@ def test_a_call_whose_waiters_runs_after_every_job_ended_holds_the_group():
         _rv("completed"),
         _job("detect", "completed"),
         _job("lock", "completed"),
-        _job("L0 / dev / app / apply", "completed"),
+        _job("waves / L0-W0 / dev / app / apply", "completed"),
         _job("summary", "completed"),
     ]
     running = [*ended, _job("waiters", "in_progress")]
     assert (aq.idle(running), aq.holds(running)) == (False, True)
     done = [*ended, _job("waiters", "completed")]
     assert (aq.idle(done), aq.holds(done)) == (False, False)
+
+
+@pytest.mark.parametrize(
+    ("name", "part"),
+    [
+        ("apply / run / waves / L0-W2 / dev / app / apply", "apply"),
+        ("apply / run / waves / L10-W3 / dev / app / save", "save"),
+        ("apply / run / L0-W2 / dev / app / apply", None),
+        ("outer / apply / run / waves / L0-W2 / dev / app / apply", None),
+        ("apply / run / other / L0-W0 / dev / app / apply", None),
+        ("apply / run / waves / L0 / dev / app / apply", None),
+    ],
+)
+def test_a_cell_job_is_exactly_seven_segments_under_the_waves_call(name, part):
+    """`<caller> / run / waves / <stage> / <env> / <stack> / <part>`: six or eight segments, a
+    lookalike with another third segment and the old `L<n>` shape are no cell. Mutations:
+    accept six segments; skip the `waves` segment check."""
+    assert aq._cell_part({"name": name}) == part

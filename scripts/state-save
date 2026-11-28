@@ -155,14 +155,14 @@ def matching(name, digest):
 
 
 def _cell(stack, env, own):
-    """`{"apply": [...], "save": [...]}`, the cell's rows at this job's level in the run's
-    `filter=all` listing; refuses when the listing fails or does not list this job."""
+    """`{"apply": [...], "save": [...]}`, the cell's rows in any stage under this job's caller in
+    the run's `filter=all` listing; refuses when the listing fails or does not list this job."""
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
     jobs = listed_jobs(repo, run_id, counted=True, job_filter="all")
-    level = ag.level_of(jobs or [], os.environ["JOB_ID"])
-    if not level:
+    prefix = ag.stage_prefix(ag.level_of(jobs or [], os.environ["JOB_ID"]))
+    if not prefix:
         refuse("the run's job listing failed or does not list this job", [own])
-    return ag.cell_rows(jobs, level, stack, env)
+    return ag.cell_rows_any_stage(jobs, prefix, stack, env)
 
 
 def _unsaved(cell, stack, env, own):
