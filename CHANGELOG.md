@@ -8,7 +8,9 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.59.0] — 2026-11-28
+
+Re-pin with `python <engine>/scripts/repin <consumer> v0.59.0` in a pull request that changes no stack: the published `shipmate.yml` fence is unchanged. Before the re-pin merges, keep `SHIPMATE_APP_PRIVATE_KEY` only on the `shipmate-engine` environment: a repository- or organization-scoped key, or one on an apply environment, makes every `apply` refuse. Rename or remove any ruleset, alert or dashboard reference to the job checks `apply / claim`, `.../L<n> / wave<n>-complete` and `.../L<n> / wave<k>-release` (### Changed — BREAKING).
 
 ### Changed — BREAKING
 
