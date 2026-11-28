@@ -339,8 +339,8 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   # `lock` released the first stage, or its runner was lost, and `waves` did not succeed: when
-  # that stage's own `complete` did not finish, this classifies its cells from their rows. Every
-  # refusal `lock` records before the release keeps it off.
+  # that stage's own `complete` did not succeed and was not skipped, this classifies its cells
+  # from their rows. Every refusal `lock` records before the release keeps it off.
   unflip:
     needs: [review, detect, lock, waves]
     if: ${{ always() && needs.detect.outputs.empty != 'true' && needs.waves.result != 'success' && needs.lock.result != 'skipped' && needs.lock.outputs.refusal == '' }}
