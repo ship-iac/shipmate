@@ -786,7 +786,6 @@ def test_a_transposed_one_segment_cell_reads_the_stack_first_check_as_its_own(
         "stages": "[]",
         "keys": "[]",
         "counts": "[]",
-        "cells": "[]",
         "empty": "true",
         "warm": '[{"stack": "", "tf_vars": {}}]',
         "max_parallel": "10",
@@ -899,7 +898,7 @@ def test_main_prints_the_dag_shape_notice_before_a_stage_count_refusal(
 
 
 #: Two cells whose stage outputs total about 468,000 characters: under the 500,000 cap alone.
-_LONG_STACKS = [f"stacks/{c * 117_000}" for c in "ab"]
+_LONG_STACKS = [f"stacks/{c * 234_000}" for c in "ab"]
 
 #: A `push` of 60,000 characters, inside `PUSH_CAP`, written before the stage outputs.
 _LONG_PUSH = '{"stacks": ["' + "p" * 59_960 + '"], "outside": false}'
@@ -933,7 +932,7 @@ def test_main_refuses_when_the_earlier_push_carries_the_outputs_over_the_cap(tmp
     with pytest.raises(SystemExit) as exc:
         _long_deploy(tmp_path, monkeypatch)
     assert str(exc.value) == (
-        "::error::the outputs for 2 cells total 528949 characters (> 500000), past what a "
+        "::error::the outputs for 2 cells total 528854 characters (> 500000), past what a "
         "job's outputs carry; split the change."
     )
     assert github_outputs(tmp_path / "out.txt") == {
@@ -941,6 +940,29 @@ def test_main_refuses_when_the_earlier_push_carries_the_outputs_over_the_cap(tmp
         "pr_number": "7",
         "push": _LONG_PUSH,
     }
+
+
+def test_main_writes_no_cells_output(tmp_path, monkeypatch):
+    """deploy.yml reads no `cells`, and it would count against the output cap. Mutation: write
+    `stage_outputs`' `cells` again -- red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app", "dev")],
+        checks=[_apply_check("stacks/app", "dev", cells=1)],
+    )
+    assert sorted(parsed) == [
+        "counts",
+        "empty",
+        "head_sha",
+        "keys",
+        "levels",
+        "max_parallel",
+        "pr_number",
+        "push",
+        "stages",
+        "warm",
+    ]
 
 
 def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch):

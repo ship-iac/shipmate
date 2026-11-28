@@ -477,6 +477,8 @@ def main():
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"stages={stages['counts']} empty={stages['empty']}"
     )
+    # deploy.yml reads no `cells`, and every output counts against the output cap.
+    del stages["cells"]
     write_outputs(
         cap_cells=len(pending),
         **stages,

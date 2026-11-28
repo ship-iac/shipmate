@@ -30,9 +30,6 @@ outputs:
   counts:
     description: JSON list of each stage's cell count in run order.
     value: "${{ steps.detect.outputs.counts }}"
-  cells:
-    description: JSON list of every cell's `{stack, environment}`, in run order.
-    value: "${{ steps.detect.outputs.cells }}"
   empty:
     description: "'true' when no stage has a cell."
     value: "${{ steps.detect.outputs.empty }}"
