@@ -20,9 +20,9 @@ def row(stack, env):
 
 
 WAVES = {
-    "wave0": [row("stacks/dns", "dev-eu")],
-    "wave1": [row("stacks/app", "dev-eu")],
-    "wave2": [],
+    "L0-W0": [row("stacks/dns", "dev-eu")],
+    "L0-W1": [row("stacks/app", "dev-eu")],
+    "L0-W2": [],
 }
 
 
@@ -141,7 +141,7 @@ def test_a_single_cell_with_no_apply_check_fails_the_whole_run():
     # Excluding the cell instead would let it apply for real with no id for the trailing
     # completer to PATCH: its check stays pending forever, the gate stays pending with it, and a
     # re-run hits the exact-plan stale-plan fail-safe against the state that cell already
-    # advanced. This runs pre-flight, before wave0, so failing costs the run but applies nothing.
+    # advanced. This runs pre-flight, before its stage, so failing costs the run but applies none.
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.snapshot(WAVES, [check("apply / dev-eu / stacks/dns", 1)], APP_ID)
     assert "apply / dev-eu / stacks/app" in str(exc.value)
@@ -168,7 +168,7 @@ def test_a_run_where_no_cell_has_a_check_fails_loudly():
 
 
 def test_an_empty_wave_set_needs_no_checks():
-    assert apply_snapshot.snapshot({"wave0": [], "wave1": None}, [], APP_ID) == {}
+    assert apply_snapshot.snapshot({"L0-W0": [], "L0-W1": None}, [], APP_ID) == {}
 
 
 def test_an_empty_app_id_refuses_before_any_check_is_read(monkeypatch):
@@ -273,7 +273,7 @@ def test_a_script_refusal_writes_the_refusal_output(tmp_path):
     `run_annotated` -> no output written."""
     env = {
         **_snap_env(tmp_path, "false"),
-        "SHIPMATE_WAVES_JSON": json.dumps({"wave1": WAVES["wave1"]}),
+        "SHIPMATE_WAVES_JSON": json.dumps({"L0-W1": WAVES["L0-W1"]}),
     }
     proc, _ = run_with_gate_gh(
         tmp_path,
@@ -292,8 +292,8 @@ def test_the_action_declares_exactly_these_outputs():
     assert action_yaml(ACTIONS / "apply-snapshot" / "action.yml")["outputs"] == {
         "by_wave": {
             "description": (
-                "JSON object mapping each wave key of `waves-json` to the pre-existing "
-                "apply-check ids of that wave's cells; `{}` for an empty wave."
+                "JSON object mapping each stage key snapshotted to the pre-existing "
+                "apply-check ids of that stage's cells; `{}` for an empty stage."
             ),
             "value": "${{ steps.snap.outputs.by_wave }}",
         },
@@ -337,9 +337,9 @@ def _snap_env(tmp_path, counted):
 
 
 _EIGHT_WAVES = {
-    "wave0": [row("dns", "dev")],
-    "wave1": [row("app", "dev"), row("web", "dev")],
-    **{f"wave{n}": [] for n in range(2, 8)},
+    "L0-W0": [row("dns", "dev")],
+    "L0-W1": [row("app", "dev"), row("web", "dev")],
+    **{f"L0-W{n}": [] for n in range(2, 8)},
 }
 _EIGHT_SNAPSHOT = {
     "apply / dev / dns": [1],
@@ -349,26 +349,26 @@ _EIGHT_SNAPSHOT = {
 
 
 def test_by_wave_slices_the_snapshot_per_wave():
-    """Mutations: put the whole snapshot under every key -> wave0 holds wave1's cells; drop the
-    keys whose wave is empty -> wave2..wave7 are missing."""
+    """Mutations: put the whole snapshot under every key -> L0-W0 holds L0-W1's cells; drop the
+    keys whose stage is empty -> L0-W2..L0-W7 are missing."""
     assert apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT) == {
-        "wave0": {"apply / dev / dns": [1]},
-        "wave1": {"apply / dev / app": [2, 5], "apply / dev / web": [3]},
-        "wave2": {},
-        "wave3": {},
-        "wave4": {},
-        "wave5": {},
-        "wave6": {},
-        "wave7": {},
+        "L0-W0": {"apply / dev / dns": [1]},
+        "L0-W1": {"apply / dev / app": [2, 5], "apply / dev / web": [3]},
+        "L0-W2": {},
+        "L0-W3": {},
+        "L0-W4": {},
+        "L0-W5": {},
+        "L0-W6": {},
+        "L0-W7": {},
     }
 
 
 def test_a_wave_slice_reads_no_later_wave_as_unmatched():
-    """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
-    every key of `by_wave` instead of those of its wave results -> wave1's cells read
+    """L0-W0's completion runs before L0-W1 has a job in the listing. Mutation: `classify` walks
+    every key of `by_wave` instead of those of its wave results -> L0-W1's cells read
     unresolved."""
     by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
-    assert apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, STAGE_PATH, 1) == (
+    assert apply_complete.classify(by_wave, {"L0-W0": "success"}, JOBS, STAGE_PATH, 1) == (
         [
             {
                 "check": "apply / dev / dns",
@@ -385,7 +385,7 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
 def test_main_writes_only_the_per_wave_slices(monkeypatch, tmp_path, capsys):
     """Mutations: write the snapshot unsliced as `by_wave` -> its line holds the whole snapshot;
     write a `snapshot` output too -> an extra line."""
-    waves = {"wave0": [row("dns", "dev")], "wave1": []}
+    waves = {"L0-W0": [row("dns", "dev")], "L0-W1": []}
     out = tmp_path / "out.txt"
     monkeypatch.setenv("SHIPMATE_APP_ID", str(APP_ID))
     monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(waves))
@@ -394,7 +394,7 @@ def test_main_writes_only_the_per_wave_slices(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(apply_snapshot.sys, "stdin", stdin)
     apply_snapshot.main()
     assert out.read_text(encoding="utf-8") == (
-        'by_wave={"wave0": {"apply / dev / dns": [1]}, "wave1": {}}\n'
+        'by_wave={"L0-W0": {"apply / dev / dns": [1]}, "L0-W1": {}}\n'
     )
     assert capsys.readouterr() == ("", "")
 
@@ -428,7 +428,7 @@ def test_only_a_check_recording_the_rows_plan_is_collected():
         pytest.param({"plan_run": "6"}, id="older-run"),
     ],
 )
-def test_a_cell_with_only_a_check_of_another_plan_refuses_before_wave0(record):
+def test_a_cell_with_only_a_check_of_another_plan_refuses_before_the_stage(record):
     """An older plan's check is collected only beside a matching one, never in its place.
 
     Mutation: warn and skip the cell instead of refusing -- no refusal, red.
@@ -449,7 +449,7 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     bound check's id.
 
     Mutation: collect by name only -- the newer check's id is written `success`, red."""
-    waves = {"wave0": [row("dns", "dev")]}
+    waves = {"L0-W0": [row("dns", "dev")]}
     extra = (
         {"plan_run": "8", "plan_sha256": None, "behind": True}
         if newer == "behind"
@@ -457,7 +457,7 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     )
     runs = [check("apply / dev / dns", 1), check("apply / dev / dns", 2, **extra)]
     by_wave = apply_snapshot.by_wave(waves, apply_snapshot.snapshot(waves, runs, APP_ID))
-    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, STAGE_PATH, 1)
+    rows, _ = apply_complete.classify(by_wave, {"L0-W0": "success"}, JOBS, STAGE_PATH, 1)
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1]
 
@@ -470,7 +470,7 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     Mutation: collect none of the older checks (`_older` answers False) -- id 1 is left, red.
     Mutation: collect a newer run's check too (`!=` for `<`) -- id 3 is collected, red.
     Mutation: drop the `pr` equality -- id 5 is collected, red."""
-    waves = {"wave0": [row("dns", "dev")]}
+    waves = {"L0-W0": [row("dns", "dev")]}
     behind = {"plan_run": "6", "plan_sha256": None, "behind": True}
     runs = [
         check("apply / dev / dns", 1, plan_run="6", plan_sha256="f" * 64),
@@ -482,7 +482,7 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     snap = apply_snapshot.snapshot(waves, runs, APP_ID)
     assert snap == {"apply / dev / dns": [1, 2]}
     rows, _ = apply_complete.classify(
-        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, JOBS, STAGE_PATH, 1
+        apply_snapshot.by_wave(waves, snap), {"L0-W0": "success"}, JOBS, STAGE_PATH, 1
     )
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1, 2]
@@ -500,7 +500,7 @@ def test_an_older_check_without_the_same_valid_pr_is_not_collected(own_pr, older
     Mutation: test `is not None` instead of `isinstance` and `is_pr_number` -- empty, red.
     Mutation: drop that validation -- null, red.
     Mutation: drop the `pr` equality -- older-null, red."""
-    waves = {"wave0": [row("dns", "dev")]}
+    waves = {"L0-W0": [row("dns", "dev")]}
     runs = [
         check("apply / dev / dns", 1, plan_run="6", pr=older_pr),
         check("apply / dev / dns", 2, pr=own_pr),
@@ -539,7 +539,7 @@ def test_each_unfinished_check_is_decoded_once(monkeypatch):
 )
 def test_plan_runs_compare_as_numbers(plan_run, other_run, expected):
     """Mutation: compare the `_plan_run` strings without `int` -- both cases red."""
-    waves = {"wave0": [{**row("dns", "dev"), "plan_run_id": plan_run}]}
+    waves = {"L0-W0": [{**row("dns", "dev"), "plan_run_id": plan_run}]}
     runs = [
         check("apply / dev / dns", 1, plan_run=plan_run),
         check("apply / dev / dns", 2, plan_run=other_run),

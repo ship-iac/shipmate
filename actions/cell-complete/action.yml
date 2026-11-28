@@ -1,8 +1,8 @@
 name: shipmate cell-complete
-description: Complete one cell's apply checks from its own save job, after its apply job succeeded and the job's state step saved its state - completed success, linked to the apply job, the record title restored. A pre-merge re-run, and a run whose pull request has merged, still write it. Refuses a cell its level's by_wave lists in no wave or in two, or with no check ids, and a malformed apply job id; a failed pull request read or a write that still fails after its retries fails the job, and the level's complete job then writes the check.
+description: Complete one cell's apply checks from its own save job, after its apply job succeeded and the job's state step saved its state - completed success, linked to the apply job, the record title restored. A pre-merge re-run, and a run whose pull request has merged, still write it. Refuses a cell its by_wave lists in no stage or in two, or with no check ids, and a malformed apply job id; a failed pull request read or a write that still fails after its retries fails the job, and the stage's complete job then writes the check.
 inputs:
   by-wave:
-    description: The level's apply-snapshot by_wave, as the level received it, which maps each cell's apply-check name to its ids; about 25 KiB for 256 cells, under the 128 KiB a single environment string or argument may hold.
+    description: The apply-snapshot by_wave its stage received, which maps each cell's apply-check name to its ids; about 25 KiB for 256 cells, under the 128 KiB a single environment string or argument may hold.
     required: true
   stack:
     description: The cell's stack path.

@@ -289,9 +289,10 @@ as above, and step 5 runs in every consumer repository.
   cannot move the default branch under its ruleset (422); probed 2026-10-24.
 - The App mints a fresh installation token per job and authors every
   `apply / <env> / <stack>` check (create pending, completed by the `save` job
-  of the cell that applied it, or by the level's `complete` job when a release
-  or wave of the level failed or was cancelled, or in `apply-run.yml`'s
-  `unflip` job when the first level never started), the
+  of the cell that applied it, or by the stage's `complete` job when the
+  stage's `entry` job or one of its cells failed or was cancelled, or in
+  `apply-run.yml`'s `unflip` job when the first stage's own `complete` did
+  not finish), the
   `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome

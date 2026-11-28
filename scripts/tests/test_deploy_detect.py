@@ -2002,15 +2002,16 @@ def _two_cells(tmp_path, monkeypatch, runs, check=None, urls=None, attempt="1"):
 @pytest.mark.parametrize("status", ["in_progress", "queued", "waiting"])
 def test_a_check_a_live_run_holds_refuses_the_deploy(tmp_path, monkeypatch, status):
     """Run 77 still runs, so its cell may be applying: the deploy refuses, naming the run, what a
-    re-run after it ends does, and the other pending cell, and writes no wave.
+    re-run after it ends does, and the other pending cell, and writes no stages.
 
     Mutation: drop the `refuse_in_flight` call -- deploys, red.
+    Mutation: call `refuse_in_flight` after `write_outputs` -- `stages` written, red.
     Mutation: treat only `in_progress` as live -- `queued` and `waiting` read a jobs listing
     the stub does not hold and refuse as unreadable, red."""
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder(status))
     assert str(exc.value) == _LIVE
-    assert "wave0" not in github_outputs(tmp_path / "out.txt")
+    assert "stages" not in github_outputs(tmp_path / "out.txt")
 
 
 def test_a_newer_replan_check_does_not_hide_an_older_held_one(tmp_path, monkeypatch):
@@ -2032,7 +2033,7 @@ def test_a_newer_replan_check_does_not_hide_an_older_held_one(tmp_path, monkeypa
             runs=_holder("in_progress"),
         )
     assert str(exc.value) == _LIVE
-    assert "wave0" not in github_outputs(tmp_path / "out.txt")
+    assert "stages" not in github_outputs(tmp_path / "out.txt")
 
 
 @pytest.mark.parametrize("name", [APP_APPLY, APP_SAVE], ids=["apply", "save"])

@@ -494,7 +494,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except twenty-six that run neither `terramate` nor `tofu` and stay on
+engine job except eighteen that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
@@ -604,7 +604,7 @@ jobs:
     with:
       runs_on: *runner
   deploy:
-    # Display only: the job path reads `shipmate / deploy / L<n> / <env> / <stack> / apply`.
+    # Display only: the job path reads `shipmate / deploy / waves / L<i>-W<w> / <env> / <stack> / apply`.
     name: deploy
     if: github.event_name == 'push'
     concurrency:
@@ -941,7 +941,7 @@ the file whose `secrets:` block names no engine credential.
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
 pre-merge. Its `name: deploy` is display only: the run's job path reads
-`shipmate / deploy / L<n> / <env> / <stack> / apply`.
+`shipmate / deploy / waves / L<i>-W<w> / <env> / <stack> / apply`.
 
 ### Why the jobs name their secrets
 

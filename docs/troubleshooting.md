@@ -695,9 +695,9 @@ stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
-The apply run stopped in its pre-flight, before any wave: `lock` for an apply
-run's first populated env-level, `snapshot` for a later level or a merge
-deploy. The error names
+The apply run stopped in its pre-flight, before the stage applied: `lock` for
+an apply run's first populated env-level, a stage's `entry` for a later level
+or a merge deploy. The error names
 every environment the applies would have bound that the repository does not have.
 
 Why the pre-flight refuses instead of warning: GitHub creates a missing environment
@@ -707,7 +707,7 @@ open the same way: a workflow on any branch can bind it. Nothing else catches
 either: a cell's variables come from the environment table and
 `matrix.environment`, so plan and apply hash identically whatever environment the
 job actually bound, and the apply-match fingerprint pins nothing about the
-binding. Existence and a branch policy, both checked before the waves, are the
+binding. Existence and a branch policy, both checked before each stage, are the
 only controls.
 
 Two fixes, and the error names both because either can be the right one:
@@ -731,7 +731,7 @@ Two neighbouring failures from the same step, both also fail-closed:
 
 - **`could not list this repository's GitHub Environments`.** The check did not
   happen, so the applies are refused rather than permitted. Check first that the
-  job calling `apply-env-level.yml` grants `actions: read`: permissions cap at
+  job calling `waves.yml` or `stage.yml` grants `actions: read`: permissions cap at
   each `uses:` boundary, and on a private repository listing environments 403s
   with `checks: read` alone. Every apply route shipped here grants it already, so
   a persistent 403 points at a hand-written caller. A 5xx or a rate limit clears
@@ -1293,7 +1293,7 @@ gate is written on the merge commit. The apply checks stay pending.
 
 ### A deploy cell refused: `its cell lock is held by`
 
-A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
+A merge deploy's cell fails at `Pre-apply check` with `` apply aborted for
 `<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
 request. Open a pull request that changes this stack. Comment `shipmate unlock
 <env> --evict` on it to release the locks <who> holds; applying it after that
@@ -1305,8 +1305,8 @@ unknown holder alone it is left out.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
-check stays pending; the waves before it have applied, and the later waves and
-env-levels are skipped, as after any failed cell. Follow the steps in §A
+check stays pending; the stages before it have applied, and the later stages
+do not start, as after any failed cell. Follow the steps in §A
 merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another
 pull request`, with this stack and every other stack whose cell did not apply.
 The merged pull request keeps its locks on the cells that did not apply, other
@@ -1456,8 +1456,8 @@ before `Save the cell's state` reports `success`.
 
 A `save` job that fails after `Save the cell's state` succeeded, at
 `Complete this cell's apply check`, saved the state; this section does not
-apply. Its check write failed, so the wave fails, later waves and environment
-levels do not start, and the level's `complete` job writes the check `success`.
+apply. Its check write failed, so the stage fails, later stages do not start,
+and the stage's `complete` job writes the check `success`.
 
 A `save` job whose apply never ran saves nothing and succeeds. When an earlier
 attempt may have applied the cell without saving, a re-run's `save` job looks
@@ -2887,7 +2887,7 @@ reason. On every form it refuses when:
 - `the apply reached the wave without its base tip, plan run and plan-text
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
-  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
+  were re-run ("Re-run failed jobs"). A re-run's `entry` jobs write no apply
   check and its completion jobs write only successes and held checks, since a later run may have
   completed those checks already. Comment `shipmate apply`. A merge deploy's
   re-run is allowed. "Re-run all jobs" reaches this check only when no earlier
@@ -3236,8 +3236,8 @@ A `shipmate apply` or `auto` run was dispatched for a head the pull request no
 longer has, and it was still waiting: in the apply queue, or on an
 `<env>-apply` environment's approval. This run cancelled it. A run cancelled in
 the queue changed nothing. A run cancelled at an approval leaves the apply
-checks of that wave's cells pending on the old head, titled `Cancelled`, and
-those of its later waves titled `Not run`. The gate that counts is
+checks of that stage's cells pending on the old head, titled `Cancelled`, and
+those of its later stages `queued` as they were. The gate that counts is
 the current head's, which carries its own apply checks.
 
 ### `may wait for an earlier apply run of this pull request; its apply runs could not all be listed`
@@ -3355,9 +3355,9 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All twenty-nine jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+All twenty-one jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
 `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
-`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`
+`apply-run.yml` `review`, `waiters`, `lock`, `unflip` and `summary`, `stage.yml` `entry`
 and `complete`, `cell.yml` `save`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
@@ -3398,9 +3398,9 @@ back to `queued`, titled with the outcome; the plan summary is unchanged
 - `Cancelled`: the cell's job was cancelled, by a cancel of the run or by a
   newer apply run of the pull request (§`cancelled an apply run of this pull
   request waiting at an older head`). Comment `shipmate apply`.
-- `Not run`: the cell's wave never ran: its release job failed, an earlier wave
-  failed, or the run was cancelled before the wave started. Fix what stopped the
-  earlier wave, then comment `shipmate apply`.
+- `Not run`: the cell's job never started: its stage's `entry` job failed
+  after the release, or the run was cancelled before the cell started. Fix what
+  stopped the stage, then comment `shipmate apply`.
 - `Not applied (<conclusion>)`: the job ended with another conclusion, such as
   `timed_out` or a rejected environment approval. Comment `shipmate apply`.
 
@@ -3417,7 +3417,7 @@ another run holds in progress; follow the remedy that sentence names.
 ### An apply check never completes after a successful apply
 
 The apply itself succeeded, but the `apply / <env> / <stack>` check stays
-pending and the job that completes it, the cell's `save` job or the level's
+pending and the job that completes it, the cell's `save` job or the stage's
 `complete` job, failed.
 
 The `shipmate-engine` environment's deployment branch policy names a branch that
@@ -3565,8 +3565,8 @@ The annotation starts `deploy refused:` and names, per cause, the cells with
 an apply check `in_progress` under a run other than this deploy, the newest or an
 older one under a newer re-plan check. It ends
 naming every other pending cell of the merge, which the refused deploy does not
-apply either. A release job flips a cell's check to `in_progress` with a link to its run (in an
-apply run, `lock` flips the first populated level's `wave0` instead), and that run's completion writes it again. A gate-bypassing merge while
+apply either. A stage's `entry` job flips a cell's check to `in_progress` with a link to its run (in an
+apply run, `lock` flips the first stage instead), and that run's completion writes it again. A gate-bypassing merge while
 that run is live, or a run that ended before its completion wrote the check,
 leaves the check `in_progress` on the merged head. The deploy reads the linked
 run before it applies the cell: a live run may still apply it, and an ended one

@@ -263,22 +263,22 @@ prefix.
 Every engine workflow a consumer calls takes a `runs_on:` input whose default
 is `ubuntu-26.04-arm`. GitHub publishes no `ubuntu-latest`-style alias for
 arm64, so the default is a pinned label. The input sets the runner of every
-engine job but twenty-six:
+engine job but eighteen:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
 - `apply-run.yml` and `deploy.yml`: `detect`, each apply cell's `apply` and
-  `save` jobs in `cell.yml`, which `apply-env-level.yml` calls with the
-  `runs_on` both pass (`apply.yml` passes it to `apply-run.yml`), `lock` in `apply-run.yml`, and `warm` and `replan` in
+  `save` jobs in `cell.yml`, which `stage.yml` calls with the
+  `runs_on` both pass through `waves.yml` (`apply.yml` passes it to `apply-run.yml`), `lock` in `apply-run.yml`, and `warm` and `replan` in
   `deploy.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 - `release.yml`: `release`.
 
-The input does not reach twenty-six jobs, which run on `ubuntu-slim` and run neither
+The input does not reach eighteen jobs, which run on `ubuntu-slim` and run neither
 `tofu` nor `terramate`: `claim`, `facts`, `defer`, `defer-auto`, `gate-hold` and `outcome` in `plan.yml`; `guard`,
-`queue` and `outcome` in `apply.yml`; `review`, `waiters`, `unflip` and `summary` in `apply-run.yml`; `summary` in `deploy.yml`; `snapshot`,
-`wave0-release` … `wave7-release` and `complete` in `apply-env-level.yml`; and
+`queue` and `outcome` in `apply.yml`; `review`, `waiters`, `unflip` and `summary` in `apply-run.yml`; `summary` in `deploy.yml`; `entry` and
+`complete` in `stage.yml`; and
 `guard` and `result` in `unlock.yml`.
 
 `issues` in `drift.yml`, `lock` in `apply-run.yml`, `release` in `release.yml` and

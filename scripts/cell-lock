@@ -54,7 +54,7 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   record names, a draft-origin record has a distinct authorizer, no newer `shipmate plan` run of
   the pull request created since that autoplan is live or planned, and the authorizer's actor
   still passes `authorize.pusher_reason`. A "Re-run failed
-  jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait hours
+  jobs" of an apply re-runs its stages without `detect` or `acquire`, and a stage can wait hours
   on an environment approval, so each apply cell checks here before its credentials. The base
   tip comparison is whole-branch: any base merge refuses every cell still to apply in this run.
   With `SHIPMATE_DEPLOY` `true` (a merge deploy's wave) it runs no other check and refuses only

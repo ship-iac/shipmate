@@ -1788,7 +1788,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     `applied`) -- red."""
     snap = load_script("apply-snapshot")
     plan = {"plan_run_id": "5", "plan_sha256": "e" * 64}
-    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
+    waves = {"L0-W0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
     record = json.dumps({"plan_run": "5", "plan_sha256": "e" * 64})
     run = {
         "id": 7,
@@ -2556,7 +2556,7 @@ def test_main_renders_a_failed_detects_refusal_without_cells(monkeypatch, tmp_pa
     )
 
 
-@pytest.mark.parametrize("raw", ["nope", '{"wave0": []}', '[{"stack": 1}]'])
+@pytest.mark.parametrize("raw", ["nope", '{"L0-W0": []}', '[{"stack": 1}]'])
 def test_main_refuses_malformed_cells(monkeypatch, tmp_path, raw):
     """Mutation: return `set()` for a `None` from `cell_names` in `_expected_cells` -- the
     render goes on, red."""

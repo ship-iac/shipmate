@@ -480,7 +480,8 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
     comment unchanged. Mutation: set the input `required: true` -- red."""
     assert action_yaml("apply-summary")["inputs"]["detect-refusal"] == {
         "description": (
-            "detect's `refusal` output, setup's or else apply-detect's: the first error of the "
+            "detect's `refusal` output, apply-pr-read's, setup's or else apply-detect's: the first "
+            "error of the "
             "`::error::` message that "
             "failed detect (whatever its cause, a failed tool or API call included) on one line, "
             "empty when detect raised none. Non-empty, the comment shows it in a "

@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Map every cell in this run's wave matrices to its App-authored apply-check ids.
+"""Map every cell of the given stages to its App-authored apply-check ids.
 
-Runs BEFORE wave0: the completers (each cell's `save`, the level's `complete`) mark only these
-ids done, so an apply check created mid-run by a fresh plan is left pending (its plan was never
-applied here) instead of being greened. Only checks authored by the shipmate App are eligible —
-a forged same-name check from any other identity is never completed — only those not yet
-`completed`: a completed same-head duplicate is left alone, since a later write would relink or
-retitle it — and only those whose record names the wave row's plan run and plan-text digest, or
-an older plan run of the same pull request: a check a newer plan, or a plan that found the cell
-behind the base, published after detect is not this run's to complete, while an older plan's
-unfinished duplicate is superseded by this apply.
-The jobs that run it (`apply-env-level.yml`'s `snapshot`, `apply-run.yml`'s `lock` and
-`unflip`) hold the App key and check out no repository content, so no branch content runs beside
-the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
-right before that wave and completed by each cell's `save` job, or by the level's `complete`.
+Runs BEFORE those stages: the completers (each cell's `save`, the stage's `complete`, `unflip`)
+mark only these ids done, so an apply check created mid-run by a fresh plan is left pending (its
+plan was never applied here) instead of being greened. Only checks authored by the shipmate App
+are eligible — a forged same-name check from any other identity is never completed — only those
+not yet `completed`: a completed same-head duplicate is left alone, since a later write would
+relink or retitle it — and only those whose record names the wave row's plan run and plan-text
+digest, or an older plan run of the same pull request: a check a newer plan, or a plan that
+found the cell behind the base, published after detect is not this run's to complete, while an
+older plan's unfinished duplicate is superseded by this apply.
+The jobs that run it (`stage.yml`'s `entry`, and its `complete` after a lost `entry` runner;
+`apply-run.yml`'s `lock`, and its `unflip` after a lost `lock` runner) hold the App key and
+check out no repository content, so no branch content runs beside the key. `by_wave` slices the
+snapshot per stage, so each stage's checks are flipped right before that stage and completed by
+each cell's `save` job, or by the stage's `complete`.
 """
 
 import json
@@ -33,7 +34,7 @@ def snapshot(waves, check_runs, app_id):
     from refusing below.
 
     Every wanted cell must have one. A cell that has none fails the run here,
-    before wave0 and so before anything applies. Skipping it would let that
+    before its stage and so before anything of it applies. Skipping it would let that
     cell mutate infrastructure with no id for a completer to PATCH:
     its apply check stays pending forever, the gate stays pending with it, and
     a re-run hits the exact-plan stale-plan fail-safe against the state the

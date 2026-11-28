@@ -88,7 +88,7 @@ def parse_check_name(name):
 
 def cell_job_name(stack, env):
     """A cell job's own name, `<env> / <stack>`, as `plan.yml`, `drift.yml` and
-    `apply-env-level.yml` declare it. GitHub prefixes each caller level's job name."""
+    `stage.yml` declare it. GitHub prefixes each caller level's job name."""
     return f"{env} / {stack}"
 
 

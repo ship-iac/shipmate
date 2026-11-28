@@ -1269,7 +1269,7 @@ apply to the cell. None of the three binds `shipmate-engine`, so none holds the
 App key (§16). An apply cell's `apply` job refuses at its first step, before
 any pull-request code runs, when a `SHIPMATE_APP_PRIVATE_KEY` secret reaches
 it: from its bound environment, or from a repository or organization secret,
-which every wave passes to the cell. A repository- or organization-scoped key
+which every stage passes to the cell. A repository- or organization-scoped key
 therefore makes every `apply` refuse.
 
 The cell's `save` job, in the same `cell.yml` call, binds `shipmate-engine`
@@ -1441,7 +1441,7 @@ The engine's own fork handling does not change: a fork's pull request starts `fa
   `SHIPMATE_ENCRYPTION_KEY` (`CONTRACT.md` §Plan artifact encryption). Whoever
   holds the encryption key reads both (§7–9).
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
-  cannot be an expression, so `id-token: write` on the wave, unlock, plan and
+  cannot be an expression, so `id-token: write` on the apply cell, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs
   every cell in a job that can mint an OIDC token for any audience, from a job
   that runs tofu over branch-authored configuration (see "Plan-time code

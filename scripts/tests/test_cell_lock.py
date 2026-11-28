@@ -1549,7 +1549,7 @@ def test_acquire_locks_every_cell_of_the_run(monkeypatch, tmp_path):
             id="not-json",
         ),
         pytest.param(
-            {"SHIPMATE_CELLS": json.dumps({"wave0": [AUTH]})},
+            {"SHIPMATE_CELLS": json.dumps({"L0-W0": [AUTH]})},
             "SHIPMATE_CELLS must be a JSON list of {stack, environment} objects",
             id="not-a-list",
         ),

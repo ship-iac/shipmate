@@ -1,12 +1,13 @@
 name: shipmate apply-complete
-description: Write the apply checks of the given waves from their cells' apply and save jobs in this run - completed on success, held in progress when an attempt's state may not be saved, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
+description: Write the apply checks of one stage from its cells' apply and save jobs in this run - completed on success, held in progress when an attempt's state may not be saved, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
 inputs:
   by-wave:
-    description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
+    description: JSON object, apply-snapshot's by_wave, mapping each stage key to its cells' apply-check ids.
     required: true
   wave-results:
-    description: With `mode` `complete`, JSON object mapping this stage's key to the result of its cell matrix. A cell with no job is not run when its stage is `skipped`, or `cancelled` with the stage's `cancelled` literal matrix row listed and none of its cells listed; any other cell with no job is retried and then left unwritten. Unused by `unflip`.
-    required: true
+    description: With `mode` `complete`, JSON object mapping this stage's key to the result of its cell matrix. A cell with no job is not run when its stage is `skipped`, or `cancelled` with the stage's `cancelled` literal matrix row listed and none of its cells listed; any other cell with no job is retried and then left unwritten; empty refuses. Unused by `unflip`, which passes none.
+    required: false
+    default: ""
   job-id:
     description: This job's own check run id (`job.check_run_id`), whose listed name names its stage (`... / waves / L<i>-W<w> / complete`), or `... / run / unflip` with `mode` `unflip`.
     required: true
@@ -49,7 +50,7 @@ runs:
         SHIPMATE_MODE: ${{ inputs.mode }}
         SHIPMATE_FIRST_KEY: ${{ inputs.first-key }}
         SHIPMATE_ENTRY_PHASE: ${{ inputs.phase }}
-      # `apply-complete list` paginates because a 256-cell level exceeds the 100-per-page cap.
+      # `apply-complete list` paginates because a 256-cell stage exceeds the 100-per-page cap.
       # Unlike apply-summary's cosmetic listing, this one decides which checks complete, so it
       # never degrades to no data: that would silently strand every applied check pending.
       run: |
@@ -62,12 +63,12 @@ runs:
         : > "$RUNNER_TEMP/rows.jsonl"
         : > "$RUNNER_TEMP/stranded.txt"
         ok=""
-        # ~2 minutes, not the ~30s a lag needs: exhausting it fails the env-level, and
-        # deploy.yml's `!failure()` guards then skip every successor env-level, halting a
-        # multi-region deploy over infrastructure that already applied.
+        # ~2 minutes, not the ~30s a lag needs: exhausting it fails the stage, and the
+        # fail-fast stage matrix then starts no later stage, halting a multi-region deploy
+        # over infrastructure that already applied.
         delays=(2 3 5 10 10 10 10 10 10 10 10 10 10)
         attempts=$(( ${#delays[@]} + 1 ))
-        # The listing lags behind a finished wave job, and an undecided cell is not one that did
+        # The listing lags behind a finished cell job, and an undecided cell is not one that did
         # not run. Re-reading the listing IS the retry: hoisting the fetch out of the loop turns
         # the loop into one read plus the whole sleep budget over a fixed snapshot.
         for n in $(seq "$attempts"); do
@@ -135,7 +136,7 @@ runs:
       shell: bash
       # Deliberately last, and deliberately still a failure: a stranded check blocks the gate
       # forever while reporting success everywhere a human looks. Failing in the listing step
-      # instead would discard a level's decided writes over one lagging cell.
+      # instead would discard a stage's decided writes over one lagging cell.
       run: |
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then

@@ -25,8 +25,8 @@ vf = load_script("verify-environments")
 
 
 WAVES = {
-    "wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
-    "wave1": [],
+    "L0-W0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
+    "L0-W1": [],
 }
 
 
@@ -50,19 +50,19 @@ def test_bindings_are_the_distinct_env_bindings_detect_resolved():
     """`prod` is a shared environment, so its binding is the bare name; the script must take
     that from the cell, not recompute `<env>-apply`."""
     waves = {
-        "wave0": [
+        "L0-W0": [
             {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
             {"stack": "b", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
         ],
-        "wave1": [{"stack": "a", "environment": "prod", "env_binding": "prod"}],
-        "wave2": None,
+        "L0-W1": [{"stack": "a", "environment": "prod", "env_binding": "prod"}],
+        "L0-W2": None,
     }
     assert vf.required_bindings(waves) == ["dev-eu-apply", "prod"]
 
 
 def test_a_payload_with_no_cell_is_refused_rather_than_passed():
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [], "wave1": None})
+        vf.required_bindings({"L0-W0": [], "L0-W1": None})
     assert "no cell" in str(exc.value)
 
 
@@ -73,7 +73,7 @@ def test_a_cell_without_an_env_binding_is_refused_as_a_malformed_hand_off():
     Mutation: read `cell.get("env_binding", f"{cell['environment']}-apply")` -- no refusal.
     """
     with pytest.raises(SystemExit) as exc:
-        vf.required_bindings({"wave0": [{"stack": "a", "environment": "dev-eu"}]})
+        vf.required_bindings({"L0-W0": [{"stack": "a", "environment": "dev-eu"}]})
     assert str(exc.value) == (
         "::error::a wave matrix cell carries no 'env_binding' key, so the environment it "
         "would bind could not be checked; this is a malformed hand-off rather than "
@@ -175,7 +175,7 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
     text is also the step's `refusal` output, which `lock` folds into its own. Mutation: drop
     `refusal_output=True` from the script's `run_annotated` -> no output written."""
     waves = {
-        "wave0": [
+        "L0-W0": [
             {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
             {"stack": "b", "environment": "prod", "env_binding": "prod-apply"},
         ]
@@ -224,7 +224,7 @@ def test_unparseable_waves_json_fails_the_run(tmp_path):
 def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
     # The other half of the branch: with dev-eu shared, `dev-eu-apply` need not exist and
     # `dev-eu` must.
-    waves = {"wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
+    waves = {"L0-W0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
     proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(waves))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
@@ -237,7 +237,7 @@ NO_POLICY_REASON = (
     "default branch, or set the policy in the environment's settings.\n"
 )
 POLICY_WAVES = {
-    "wave0": [
+    "L0-W0": [
         {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
         {"stack": "b", "environment": "prod", "env_binding": "prod"},
         {"stack": "c", "environment": "stg", "env_binding": "stg-apply"},

@@ -1,8 +1,8 @@
 name: shipmate verify-environments
-description: Refuse an apply run before its first wave when a cell would bind a GitHub Environment that does not exist or has no deployment branch policy. Holds no App key; GITHUB_TOKEN lists environments with checks:read plus actions:read, which a private repository needs as well.
+description: Refuse an apply run before the given stages apply when a cell would bind a GitHub Environment that does not exist or has no deployment branch policy. Holds no App key; GITHUB_TOKEN lists environments with checks:read plus actions:read, which a private repository needs as well.
 inputs:
   waves-json:
-    description: This run's wave matrices (the apply-env-level.yml waves_json shape).
+    description: JSON object mapping each stage key to its cell rows, such as one element of detect's `levels`.
     required: true
   key:
     description: One stage key of `waves-json` to verify alone; empty verifies every stage. A key the map lacks refuses.
