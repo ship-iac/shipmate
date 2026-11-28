@@ -932,13 +932,16 @@ def live_push_runs(repo, sha, run=None):
     return sorted({(r["id"], r["run_attempt"]) for r in live}), True
 
 
-def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
-    """Every job of run `run_id`'s latest attempt, or of every attempt with `job_filter="all"`, each
-    as the API returns it, possibly none; or None when a page fails or is malformed or a job has
-    no string `status` or `name`, so no caller sees a partial listing, or, with `counted`, when
-    `_pages` finds the count short. Each None prints its cause as one warning."""
+def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest", attempt=None):
+    """Every job of run `run_id`'s latest attempt, of every attempt with `job_filter="all"`, or of
+    run attempt `attempt` when given (that attempt's endpoint, which also lists the jobs a re-run
+    carried from earlier attempts), each as the API returns it, possibly none; or None when a page
+    fails or is malformed or a job has no string `status` or `name`, so no caller sees a partial
+    listing, or, with `counted`, when `_pages` finds the count short. Each None prints its cause
+    as one warning."""
+    path = f"repos/{repo}/actions/runs/{run_id}"
     jobs = _pages(
-        f"repos/{repo}/actions/runs/{run_id}/jobs?filter={job_filter}",
+        f"{path}/attempts/{attempt}/jobs" if attempt else f"{path}/jobs?filter={job_filter}",
         "jobs",
         run,
         counted=counted,

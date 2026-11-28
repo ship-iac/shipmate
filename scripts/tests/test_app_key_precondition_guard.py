@@ -34,6 +34,9 @@ repeats a plan, so a missing key plans, and its read step warns on the empty tok
 `auto-dispatch` carries the call under its deferred-mode `if:`. Called with the environments
 already decided, its caller `summary` verified the key as its own first step.
 
+`apply-release` carries the call under its release-mode `if:`: guard mode mints nothing and
+reads the job listing with the job's own token.
+
 `apply-run.yml`'s `review` makes the call ninth, under the `admitted` gate: its six dispatch
 checks read no key, its claim step verifies the key inside `actions/claim`, and its `admit` step
 reads none. A run whose claim reads `taken` mints nothing more.
@@ -122,6 +125,7 @@ _DEGRADING = {ACTIONS / "plan-defer" / "action.yml"}
 #: Sites whose call carries an `if:`; the module docstring says why.
 _CONDITIONAL = {
     ACTIONS / "auto-dispatch" / "action.yml": "${{ inputs.deferred-to != '' }}",
+    ACTIONS / "apply-release" / "action.yml": "${{ inputs.mode != 'guard' }}",
     WORKFLOWS / "apply-run.yml": "${{ steps.admit.outputs.admitted == 'true' }}",
 }
 
