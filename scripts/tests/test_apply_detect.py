@@ -1823,7 +1823,11 @@ def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch
         {**cell_job("save", steps=(), conclusion="failure"), "id": 7},
     ]
     rows, _ = ac.classify(
-        {"wave0": {"apply / dev-eu / stacks/app": [1]}}, {"wave0": "success"}, listing, "5"
+        {"L0-W0": {"apply / dev-eu / stacks/app": [1]}},
+        {"L0-W0": "success"},
+        listing,
+        ac.ag.level_of(listing, "5"),
+        ac._own(listing, "5").get("run_attempt"),
     )
     [entry] = ac.writes(rows[0], "acme/iac")
     base = _apply_check("stacks/app", cells=1, id=entry["id"])

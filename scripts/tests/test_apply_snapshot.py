@@ -44,20 +44,21 @@ def _job(jid, name, conclusion, steps=()):
     }
 
 
-#: A wave completion job's listing: itself, `L0-W0 / complete` (id 900), and the `dns` / `dev`
-#: cell's `apply` (id 9, its apply step ran) and `save`, both succeeded.
+#: A stage completion job's listing: itself, `apply / run / waves / L0-W0 / complete` (id 900),
+#: and the `dns` / `dev` cell's `apply` (id 9, its apply step ran) and `save`, both succeeded.
+STAGE_PATH = "apply / run / waves / L0-W0"
 JOBS = [
-    _job(900, "L0-W0 / complete", None),
+    _job(900, f"{STAGE_PATH} / complete", None),
     _job(
         9,
-        "L0-W0 / dev / dns / apply",
+        f"{STAGE_PATH} / dev / dns / apply",
         "success",
         [
             {"name": "Pre-apply check", "conclusion": "success"},
             {"name": "Apply the cell", "conclusion": "success"},
         ],
     ),
-    _job(10, "L0-W0 / dev / dns / save", "success"),
+    _job(10, f"{STAGE_PATH} / dev / dns / save", "success"),
 ]
 
 
@@ -367,7 +368,7 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     every key of `by_wave` instead of those of its wave results -> wave1's cells read
     unresolved."""
     by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
-    assert apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, "900") == (
+    assert apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, STAGE_PATH, 1) == (
         [
             {
                 "check": "apply / dev / dns",
@@ -456,7 +457,7 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     )
     runs = [check("apply / dev / dns", 1), check("apply / dev / dns", 2, **extra)]
     by_wave = apply_snapshot.by_wave(waves, apply_snapshot.snapshot(waves, runs, APP_ID))
-    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, "900")
+    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, STAGE_PATH, 1)
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1]
 
@@ -481,7 +482,7 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     snap = apply_snapshot.snapshot(waves, runs, APP_ID)
     assert snap == {"apply / dev / dns": [1, 2]}
     rows, _ = apply_complete.classify(
-        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, JOBS, "900"
+        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, JOBS, STAGE_PATH, 1
     )
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1, 2]
