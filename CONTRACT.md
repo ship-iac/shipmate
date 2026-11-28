@@ -170,7 +170,7 @@ refuses the run before any cell applies.
 | applied, state saved | `completed` / `success`, linked to the cell's apply job, titled with the plan's counts. A check created before its record carried a title keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
 | failed | `queued`, titled `Failed: <first error line>`, linked to the failed job: the cell's apply job, or its `save` job when the apply never ran |
 | cancelled | `queued`, titled `Cancelled` |
-| not run: its stage was released and the cell's job never started | `queued`, titled `Not run` |
+| not run: the cell's job never started, after its stage was released or, for the first stage, after a `lock` that ended before the flip without recording a refusal (`unflip`, below) | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
 | unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Failed completion** describe |
