@@ -143,12 +143,15 @@ def classify(by_wave, results, jobs, level, attempt):
     """`(rows, unresolved)` for the cells of the stages keyed in `results`, each stage's cell
     matrix result, from the jobs listing `jobs`, reading the rows under the stage path `level` of
     run attempt `attempt`: `unresolved` labels the cells with no resolved row, each listed
-    without one also getting an `unresolved` row."""
+    without one also getting an `unresolved` row. Refuses a stage key `by_wave` lacks, as
+    `apply-release release` does: its released checks would stay `in_progress`."""
     literal = unexpanded(jobs, level, attempt)
     rows, unresolved = [], []
     for wave in sorted(results):
+        if wave not in by_wave:
+            raise SystemExit(f"::error::the stage snapshot holds no stage {wave!r}")
         cells = []
-        for check, ids in sorted((by_wave.get(wave) or {}).items()):
+        for check, ids in sorted((by_wave[wave] or {}).items()):
             both = ag.cell_rows(jobs, level, *ag.parse_check_name(check))
             own = {
                 part: [j for j in listed if j.get("run_attempt") == attempt]

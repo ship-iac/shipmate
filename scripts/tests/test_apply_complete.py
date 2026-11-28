@@ -97,7 +97,9 @@ def _from_listing(by_wave, results, listing, job_id):
     return apply_complete.classify(by_wave, results, listing, level, attempt)
 
 
-def _classify(jobs, by_wave=BY_WAVE, results=RAN, own=OWN):
+def _classify(jobs, by_wave=BY_WAVE, results=None, own=OWN):
+    """`classify` with `results` defaulting to every stage of `by_wave` run."""
+    results = {k: RAN[k] for k in by_wave} if results is None else results
     return _from_listing(by_wave, results, [own, *jobs], own["id"])
 
 
@@ -591,6 +593,14 @@ def test_unflip_refuses_a_job_not_named_unflip_or_a_key_that_is_no_stage(name, k
     )
 
 
+def test_unflip_refuses_a_first_key_the_snapshot_lacks():
+    """Mutation: restore `by_wave.get(wave) or {}` without the refusal -- no row, exit 0, red."""
+    own = job("apply / run / unflip", None, jid=950)
+    with pytest.raises(SystemExit) as exc:
+        apply_complete.unflip(UNFLIP_BY_WAVE, [own], "950", "L0-W2")
+    assert str(exc.value) == "::error::the stage snapshot holds no stage 'L0-W2'"
+
+
 def test_a_stages_complete_reads_only_its_own_stages_cells():
     """`lock`'s snapshot holds every stage of the level, and stage L0-W0 listed APP. Mutation:
     read the cell rows of any stage of the level (`cell_rows_any_stage` over
@@ -845,6 +855,13 @@ def test_main_refuses_wave_results_that_are_no_non_empty_object(results):
     assert done.returncode == 1
     assert done.stdout == ""
     assert done.stderr == "::error::wave-results must be a non-empty JSON object of wave results\n"
+
+
+def test_main_refuses_a_wave_results_key_the_snapshot_lacks():
+    """Mutation: restore `by_wave.get(wave) or {}` without the refusal -- exit 0, red."""
+    done = _run({"L0-W0": BY_WAVE["L0-W0"]}, {"L0-W1": "success"}, [OWN])
+    assert (done.returncode, done.stdout) == (1, "")
+    assert done.stderr == "::error::the stage snapshot holds no stage 'L0-W1'\n"
 
 
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
